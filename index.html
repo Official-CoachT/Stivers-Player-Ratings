@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Stivers Tigers · Player Ratings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --brown: #5C3A21;
+    --brown-dark: #3D2614;
+    --brown-light: #8A5A32;
+    --orange: #E07A29;
+    --orange-light: #F4A860;
+    --gray: #666666;
+    --gray-dark: #333333;
+    --gray-light: #D4D4D4;
+    --gray-xlight: #F5F5F5;
+    --gray-bg: #EBEBEB;
+    --white: #ffffff;
+    --text: #1a1a1a;
+    --border: #CCCCCC;
+    --font-display: 'Oswald', -apple-system, sans-serif;
+    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+  }
+  body { font-family: var(--font-body); background: #2A1A10; color: var(--text); min-height: 100vh; }
+
+  header { background: var(--brown); padding: 18px 20px; text-align: center; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 12px rgba(0,0,0,0.4); border-bottom: 3px solid var(--orange); }
+  header h1 { font-family: var(--font-display); color: var(--orange-light); font-size: 20px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  header p { font-family: var(--font-body); color: rgba(255,255,255,0.7); font-size: 12px; margin-top: 4px; letter-spacing: 0.02em; }
+
+  .tabs { display: flex; background: var(--brown-dark); border-bottom: 3px solid var(--orange); }
+  .tab { flex: 1; padding: 12px; text-align: center; color: rgba(255,255,255,0.55); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; border: none; background: none; letter-spacing: 0.04em; text-transform: uppercase; font-family: var(--font-body); }
+  .tab.active { color: var(--orange-light); border-bottom: 3px solid var(--orange); background: rgba(224,122,41,0.12); }
+
+  .view { display: none; padding: 16px; max-width: 600px; margin: 0 auto; }
+  .view.active { display: block; }
+
+  .leaderboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+  .lb-card { background: white; border-radius: 12px; padding: 14px 8px 12px; text-align: center; border: 2px solid var(--border); cursor: pointer; transition: transform 0.15s, border-color 0.15s; }
+  .lb-card:active { transform: scale(0.96); }
+  .lb-card.unrated { opacity: 0.45; }
+  .lb-avatar { width: 52px; height: 52px; border-radius: 50%; background: var(--brown); color: var(--orange-light); display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; font-family: var(--font-display); position: relative; margin: 0 auto; }
+  .lb-avatar .num { position: absolute; bottom: -4px; right: -4px; background: var(--orange); color: var(--brown-dark); font-size: 10px; font-weight: 700; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-family: var(--font-body); }
+  .lb-name { font-size: 13px; font-weight: 600; color: var(--text); margin-top: 8px; line-height: 1.2; }
+  .lb-pos { font-size: 10px; color: var(--gray); margin-top: 2px; letter-spacing: 0.03em; }
+  .lb-ovr { font-family: var(--font-display); font-size: 22px; font-weight: 700; margin-top: 6px; }
+  .lb-ovr.high { color: var(--brown); } .lb-ovr.good { color: var(--brown-light); } .lb-ovr.avg { color: var(--gray); } .lb-ovr.dev { color: #aaa; }
+  .lb-ovr-label { font-size: 9px; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: 0.05em; display: block; }
+
+  .pw-wrap { background: white; border-radius: 14px; padding: 32px 24px; text-align: center; box-shadow: 0 2px 16px rgba(0,0,0,0.2); margin-top: 20px; border-top: 4px solid var(--orange); }
+  .pw-wrap h2 { font-family: var(--font-display); color: var(--brown); font-size: 20px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .pw-wrap p { color: #666; font-size: 14px; margin-bottom: 24px; }
+  .pw-input { width: 100%; padding: 14px; font-size: 18px; text-align: center; border: 2px solid var(--border); border-radius: 10px; margin-bottom: 12px; letter-spacing: 0.15em; font-family: var(--font-body); }
+  .pw-input:focus { outline: none; border-color: var(--orange); }
+  .pw-btn { width: 100%; padding: 14px; background: var(--brown); color: var(--orange-light); font-size: 15px; font-weight: 700; border: none; border-radius: 10px; cursor: pointer; letter-spacing: 0.04em; font-family: var(--font-body); }
+  .pw-btn:active { background: var(--brown-dark); }
+  .pw-error { color: #BB0000; font-size: 13px; margin-top: 10px; display: none; }
+
+  .player-select { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+  .player-btn { background: white; border: 2px solid var(--border); border-radius: 10px; padding: 10px 6px; text-align: center; font-size: 13px; font-weight: 600; color: var(--gray-dark); cursor: pointer; transition: all 0.15s; font-family: var(--font-body); }
+  .player-btn:active { transform: scale(0.96); }
+  .player-btn.rated { border-color: var(--orange); background: #FFFBEF; }
+  .player-btn.selected { border-color: var(--brown); background: #F3E6D8; box-shadow: 0 2px 8px rgba(61,38,20,0.2); }
+  .player-btn .mini-ovr { display: block; font-size: 11px; font-weight: 700; color: var(--brown); margin-top: 2px; font-family: var(--font-display); }
+
+  .card-panel { background: white; border-radius: 14px; overflow: hidden; box-shadow: 0 2px 16px rgba(0,0,0,0.15); border-top: 4px solid var(--orange); }
+  .card-header { background: var(--brown); padding: 16px 18px; display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+  .card-avatar { width: 48px; height: 48px; border-radius: 50%; background: rgba(255,255,255,0.08); border: 2px solid var(--orange); color: var(--orange-light); display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; font-family: var(--font-display); flex-shrink: 0; }
+  .card-name-wrap { flex: 1; }
+  .name-input { font-family: var(--font-display); color: white; font-size: 18px; font-weight: 700; line-height: 1.2; background: transparent; border: none; border-bottom: 1px dashed rgba(255,255,255,0.4); width: 100%; padding: 2px 0; }
+  .name-input:focus { outline: none; border-bottom-color: var(--orange-light); }
+  .card-pos { color: var(--orange-light); font-size: 12px; letter-spacing: 0.05em; margin-top: 3px; }
+  .card-ovr-box { text-align: center; background: rgba(224,122,41,0.15); border-radius: 10px; padding: 8px 14px; min-width: 72px; border: 1px solid var(--orange); }
+  .card-ovr-num { font-family: var(--font-display); color: var(--orange-light); font-size: 28px; font-weight: 700; line-height: 1; }
+  .card-ovr-label { color: rgba(255,255,255,0.7); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+  .attr-grid { display: grid; grid-template-columns: 1fr 1fr; }
+  .attr-row { padding: 14px 18px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); }
+  .attr-row:nth-child(even) { border-right: none; }
+  .attr-row:nth-last-child(-n+2) { border-bottom: none; }
+  .attr-row.full-width { grid-column: 1 / -1; border-right: none; }
+  .attr-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray); margin-bottom: 6px; }
+  .attr-label.awareness { color: var(--brown); }
+  .attr-input-row { display: flex; align-items: center; gap: 8px; }
+  .stepper { display: flex; align-items: center; gap: 4px; }
+  .step-btn { width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--border); background: var(--gray-xlight); font-size: 15px; font-weight: 700; color: var(--brown); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .step-btn:active { background: var(--orange-light); }
+  .attr-val { font-family: var(--font-display); width: 40px; font-size: 20px; font-weight: 700; color: var(--brown); text-align: center; }
+  .attr-bar-wrap { flex: 1; height: 8px; background: var(--gray-bg); border-radius: 99px; overflow: hidden; }
+  .attr-bar { height: 100%; border-radius: 99px; background: var(--gray-light); transition: width 0.3s, background 0.3s; }
+  .attr-bar.high { background: var(--brown); }
+  .attr-bar.good { background: var(--brown-light); }
+  .attr-bar.avg { background: #C68A4A; }
+  .attr-bar.awareness-bar { background: var(--orange); }
+
+  .save-btn { width: calc(100% - 36px); margin: 16px 18px; padding: 14px; background: var(--brown); color: var(--orange-light); font-size: 15px; font-weight: 700; border: none; border-radius: 10px; cursor: pointer; letter-spacing: 0.04em; transition: background 0.2s; font-family: var(--font-body); }
+  .save-btn:active { background: var(--brown-dark); }
+  .save-btn:disabled { background: #aaa; cursor: not-allowed; }
+
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; align-items: flex-end; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: white; border-radius: 20px 20px 0 0; width: 100%; max-width: 600px; padding-bottom: 32px; max-height: 85vh; overflow-y: auto; border-top: 4px solid var(--orange); }
+  .modal-handle { width: 40px; height: 4px; background: var(--gray-light); border-radius: 99px; margin: 12px auto 0; }
+  .modal-name { font-family: var(--font-display); color: white; font-size: 18px; font-weight: 700; line-height: 1.2; }
+
+  .saved-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--brown); color: var(--orange-light); padding: 12px 24px; border-radius: 99px; font-size: 14px; font-weight: 600; transition: transform 0.3s; z-index: 999; white-space: nowrap; border: 2px solid var(--orange); }
+  .saved-toast.show { transform: translateX(-50%) translateY(0); }
+
+  .scale-bar { display: flex; gap: 4px; padding: 12px 0 0; }
+  .scale-item { flex: 1; border-radius: 6px; padding: 6px 4px; text-align: center; }
+  .scale-item .sr { font-family: var(--font-display); font-size: 11px; font-weight: 700; } .scale-item .sl { font-size: 9px; margin-top: 1px; }
+  .loading { text-align: center; color: rgba(255,255,255,0.6); padding: 32px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Stivers Tigers</h1>
+  <p>Varsity Soccer · Player Ratings · 2026 Season</p>
+</header>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('leaderboard',event)">Leaderboard</button>
+  <button class="tab" onclick="switchTab('rate',event)">Rate Players</button>
+</div>
+
+<div id="view-leaderboard" class="view active">
+  <div class="leaderboard-grid" id="lb-grid"><div class="loading">Loading ratings...</div></div>
+  <div class="scale-bar">
+    <div class="scale-item" style="background:var(--brown);color:white;"><div class="sr">90+</div><div class="sl">Elite</div></div>
+    <div class="scale-item" style="background:var(--brown-light);color:white;"><div class="sr">80–89</div><div class="sl">Excellent</div></div>
+    <div class="scale-item" style="background:#C68A4A;color:white;"><div class="sr">70–79</div><div class="sl">Good</div></div>
+    <div class="scale-item" style="background:#D4D4D4;color:#333;"><div class="sr">60–69</div><div class="sl">Average</div></div>
+    <div class="scale-item" style="background:#f0f0f0;color:#666;"><div class="sr">&lt;60</div><div class="sl">Developing</div></div>
+  </div>
+  <div style="height:20px"></div>
+</div>
+
+<div id="view-rate" class="view">
+  <div id="pw-gate">
+    <div class="pw-wrap">
+      <h2>Coach Access</h2>
+      <p>Enter the coach password to rate players</p>
+      <input class="pw-input" type="password" id="pw-input" placeholder="••••••••" onkeydown="if(event.key==='Enter')checkPW()">
+      <button class="pw-btn" onclick="checkPW()">UNLOCK</button>
+      <div class="pw-error" id="pw-error">Incorrect password. Try again.</div>
+    </div>
+  </div>
+  <div id="rate-interface" style="display:none;">
+    <div class="player-select" id="player-select"></div>
+    <div class="card-panel" id="card-panel" style="display:none;">
+      <div class="card-header">
+        <div class="card-avatar" id="card-avatar">—</div>
+        <div class="card-name-wrap">
+          <input class="name-input" id="name-input" oninput="onNameEdit()">
+          <div class="card-pos" id="card-pos">—</div>
+        </div>
+        <div class="card-ovr-box">
+          <div class="card-ovr-num" id="card-ovr">—</div>
+          <div class="card-ovr-label">OVR</div>
+        </div>
+      </div>
+      <div class="attr-grid" id="attr-grid"></div>
+      <button class="save-btn" id="save-btn" onclick="saveRatings()">SAVE RATINGS</button>
+    </div>
+    <div style="height:20px"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal" onclick="closeModal(event)">
+  <div class="modal"><div class="modal-handle"></div><div id="modal-body"></div></div>
+</div>
+<div class="saved-toast" id="toast">✓ Ratings saved!</div>
+
+<script>
+// --- Fill these in once you've created the Supabase project for this repo ---
+const SB_URL="https://ykjionmkxvtwepqikskq.supabase.co";
+const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlramlvbm1reHZ0d2VwcWlrc2txIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUxODA4NjQsImV4cCI6MjEwMDc1Njg2NH0.tebUselVjKFVW9dvrvVB88E3RoQtEVDT6_kxjX0bxRs";
+const TABLE="stivers_ratings";
+const COACH_PW="Th3WidowsS0n0523!";
+
+// Roster: id is a stable key (never changes — this is what links to saved ratings).
+// name is the default display name; can be overridden per-player in the admin panel
+// without touching this file (e.g. if you only have a first name here, edit it live).
+const PLAYERS=[
+  {id:"king",name:"King",num:1,pos:"GK"},
+  {id:"isaac",name:"Isaac",num:4,pos:"CB"},
+  {id:"rey",name:"Rey",num:5,pos:"CB"},
+  {id:"abraham",name:"Abraham",num:6,pos:"CB"},
+  {id:"jt",name:"JT",num:15,pos:"CB"},
+  {id:"jahmir",name:"Jahmir",num:2,pos:"FB"},
+  {id:"edward-castro",name:"Edward Castro",num:8,pos:"CDM"},
+  {id:"aj",name:"AJ",num:10,pos:"CM"},
+  {id:"oliver",name:"Oliver",num:11,pos:"LM"},
+  {id:"soren",name:"Soren",num:7,pos:"RM"},
+  {id:"micah",name:"Micah",num:17,pos:"LM"},
+  {id:"bryce",name:"Bryce",num:20,pos:"CAM"},
+  {id:"ryan",name:"Ryan",num:9,pos:"ST"},
+  {id:"juan",name:"Juan",num:22,pos:"CM"},
+  {id:"eduardo",name:"Eduardo",num:23,pos:"CM"},
+  {id:"anderson",name:"Anderson",num:24,pos:"CB"},
+  {id:"avery",name:"Avery",num:25,pos:"ST"}
+];
+
+const ATTRS=["Pace","Shooting","Passing","Dribbling","Defending","Physical","Awareness"];
+
+// Position-specific weighting toward OVR — must sum to 1.0 per position
+const POSITION_WEIGHTS={
+  GK:  {pace:0.05,shooting:0.00,passing:0.15,dribbling:0.05,defending:0.30,physical:0.20,awareness:0.25},
+  CB:  {pace:0.10,shooting:0.02,passing:0.13,dribbling:0.05,defending:0.35,physical:0.20,awareness:0.15},
+  FB:  {pace:0.20,shooting:0.03,passing:0.15,dribbling:0.12,defending:0.25,physical:0.10,awareness:0.15},
+  CDM: {pace:0.10,shooting:0.05,passing:0.20,dribbling:0.10,defending:0.25,physical:0.15,awareness:0.15},
+  CM:  {pace:0.10,shooting:0.10,passing:0.25,dribbling:0.15,defending:0.10,physical:0.10,awareness:0.20},
+  CAM: {pace:0.10,shooting:0.15,passing:0.20,dribbling:0.20,defending:0.05,physical:0.10,awareness:0.20},
+  LM:  {pace:0.20,shooting:0.10,passing:0.15,dribbling:0.20,defending:0.10,physical:0.10,awareness:0.15},
+  RM:  {pace:0.20,shooting:0.10,passing:0.15,dribbling:0.20,defending:0.10,physical:0.10,awareness:0.15},
+  ST:  {pace:0.20,shooting:0.30,passing:0.10,dribbling:0.15,defending:0.05,physical:0.10,awareness:0.10}
+};
+
+let db={};let sel=null;let unlocked=false;
+
+function playerById(id){ return PLAYERS.find(p=>p.id===id); }
+function displayName(id){ const r=db[id]; return (r&&r.display_name)?r.display_name:playerById(id).name; }
+function initials(name){ return name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); }
+
+async function dbFetch(){
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/${TABLE}?select=*`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+    const rows=await r.json();
+    db={};
+    if(Array.isArray(rows)) rows.forEach(r=>{db[r.id]={display_name:r.display_name,pace:r.pace,shooting:r.shooting,passing:r.passing,dribbling:r.dribbling,defending:r.defending,physical:r.physical,awareness:r.awareness};});
+  }catch(e){console.error(e);}
+}
+
+async function dbUpsert(id,data){
+  await fetch(`${SB_URL}/rest/v1/${TABLE}`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json",Prefer:"resolution=merge-duplicates"},body:JSON.stringify({id,...data})});
+}
+
+function calcOVR(id){
+  const r=db[id];const p=playerById(id);
+  if(!r||!p) return null;
+  const w=POSITION_WEIGHTS[p.pos];
+  const vals=[r.pace,r.shooting,r.passing,r.dribbling,r.defending,r.physical,r.awareness];
+  if(vals.some(v=>!v)) return null;
+  return Math.round(r.pace*w.pace+r.shooting*w.shooting+r.passing*w.passing+r.dribbling*w.dribbling+r.defending*w.defending+r.physical*w.physical+r.awareness*w.awareness);
+}
+
+function ovrClass(v){if(v===null)return'dev';if(v>=90)return'high';if(v>=80)return'good';if(v>=70)return'avg';return'dev';}
+
+function buildLeaderboard(){
+  const grid=document.getElementById('lb-grid');
+  const ranked=PLAYERS.map(p=>({...p,ovr:calcOVR(p.id)})).sort((a,b)=>{
+    if(a.ovr===null&&b.ovr===null)return 0;
+    if(a.ovr===null)return 1;if(b.ovr===null)return -1;return b.ovr-a.ovr;
+  });
+  grid.innerHTML='';
+  ranked.forEach((p)=>{
+    const name=displayName(p.id);
+    const div=document.createElement('div');
+    div.className='lb-card'+(p.ovr===null?' unrated':'');
+    div.onclick=()=>openModal(p.id);
+    div.innerHTML=`
+      <div class="lb-avatar">${initials(name)}<span class="num">${p.num}</span></div>
+      <div class="lb-name">${name}</div>
+      <div class="lb-pos">${p.pos}</div>
+      <div class="lb-ovr ${ovrClass(p.ovr)}">${p.ovr!==null?p.ovr:'—'}</div>
+      <span class="lb-ovr-label">OVR</span>`;
+    grid.appendChild(div);
+  });
+}
+
+function checkPW(){
+  const v=document.getElementById('pw-input').value;
+  if(v===COACH_PW){unlocked=true;document.getElementById('pw-gate').style.display='none';document.getElementById('rate-interface').style.display='block';buildPlayerSelect();}
+  else{document.getElementById('pw-error').style.display='block';document.getElementById('pw-input').value='';}
+}
+
+function buildPlayerSelect(){
+  const wrap=document.getElementById('player-select');
+  wrap.innerHTML='';
+  PLAYERS.forEach(p=>{
+    const ovr=calcOVR(p.id);
+    const btn=document.createElement('button');
+    btn.className='player-btn'+(ovr!==null?' rated':'')+(sel===p.id?' selected':'');
+    btn.innerHTML=`${displayName(p.id)}<span class="mini-ovr">${ovr!==null?ovr:'—'}</span>`;
+    btn.onclick=()=>selectPlayer(p.id);
+    wrap.appendChild(btn);
+  });
+}
+
+function selectPlayer(id){
+  sel=id;buildPlayerSelect();
+  const p=playerById(id);
+  document.getElementById('card-panel').style.display='block';
+  document.getElementById('card-avatar').textContent=initials(displayName(id));
+  document.getElementById('name-input').value=displayName(id);
+  document.getElementById('card-pos').textContent=`${p.pos} · #${p.num}`;
+  const grid=document.getElementById('attr-grid');
+  grid.innerHTML='';
+  const r=db[id]||{};
+  ATTRS.forEach((attr)=>{
+    const key=attr.toLowerCase();
+    const val=r[key]||50;
+    const pct=val/99*100;
+    const isAwareness=attr==='Awareness';
+    const barClass=isAwareness?'attr-bar awareness-bar':(val>=90?'attr-bar high':val>=80?'attr-bar good':'attr-bar avg');
+    const div=document.createElement('div');
+    div.className='attr-row'+(isAwareness?' full-width':'');
+    div.innerHTML=`
+      <div class="attr-label${isAwareness?' awareness':''}">${attr}</div>
+      <div class="attr-input-row">
+        <div class="stepper">
+          <button type="button" class="step-btn" onclick="stepAttr('${attr}',-1)">−</button>
+          <div class="attr-val" id="val-${attr}">${val}</div>
+          <button type="button" class="step-btn" onclick="stepAttr('${attr}',1)">+</button>
+        </div>
+        <div class="attr-bar-wrap"><div class="${barClass}" id="bar-${attr}" style="width:${pct}%"></div></div>
+      </div>`;
+    grid.appendChild(div);
+  });
+  updateOVR();
+}
+
+function onNameEdit(){
+  if(!sel)return;
+  if(!db[sel])db[sel]={};
+  db[sel].display_name=document.getElementById('name-input').value;
+  document.getElementById('card-avatar').textContent=initials(document.getElementById('name-input').value||playerById(sel).name);
+}
+
+function stepAttr(attr,dir){
+  if(!sel)return;
+  if(!db[sel])db[sel]={};
+  const key=attr.toLowerCase();
+  const current=db[sel][key]||50;
+  const val=Math.min(99,Math.max(1,current+dir));
+  db[sel][key]=val;
+  document.getElementById(`val-${attr}`).textContent=val;
+  const pct=val/99*100;
+  const bar=document.getElementById(`bar-${attr}`);
+  bar.style.width=pct+'%';
+  const isA=attr==='Awareness';
+  bar.className=isA?'attr-bar awareness-bar':(val>=90?'attr-bar high':val>=80?'attr-bar good':'attr-bar avg');
+  updateOVR();
+}
+
+function updateOVR(){
+  const ovr=calcOVR(sel);
+  document.getElementById('card-ovr').textContent=ovr!==null?ovr:'—';
+}
+
+async function saveRatings(){
+  if(!sel)return;
+  const btn=document.getElementById('save-btn');
+  btn.disabled=true;btn.textContent='SAVING...';
+  const r=db[sel]||{};
+  await dbUpsert(sel,{display_name:r.display_name||playerById(sel).name,pace:r.pace||50,shooting:r.shooting||50,passing:r.passing||50,dribbling:r.dribbling||50,defending:r.defending||50,physical:r.physical||50,awareness:r.awareness||50});
+  btn.disabled=false;btn.textContent='SAVE RATINGS';
+  buildPlayerSelect();
+  const t=document.getElementById('toast');t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);
+}
+
+function openModal(id){
+  const ovr=calcOVR(id);const r=db[id]||{};const p=playerById(id);const name=displayName(id);
+  const rows=ATTRS.map((a)=>{
+    const k=a.toLowerCase();const v=r[k]||'—';const pct=r[k]?(r[k]/99*100):0;
+    const isA=a==='Awareness';
+    const bc=isA?'attr-bar awareness-bar':(r[k]>=90?'attr-bar high':r[k]>=80?'attr-bar good':'attr-bar avg');
+    const fw=isA?' style="grid-column:1/-1;border-right:none;"':'';
+    return`<div class="attr-row"${fw}><div class="attr-label${isA?' awareness':''}">${a}</div><div class="attr-input-row"><div style="width:64px;text-align:center;font-family:var(--font-display);font-size:22px;font-weight:700;color:var(--brown);">${v}</div><div class="attr-bar-wrap"><div class="${bc}" style="width:${pct}%"></div></div></div></div>`;
+  }).join('');
+  document.getElementById('modal-body').innerHTML=`
+    <div class="card-header" style="border-radius:0;">
+      <div class="card-avatar">${initials(name)}</div>
+      <div class="card-name-wrap"><div class="modal-name">${name}</div><div class="card-pos">${p.pos} · #${p.num}</div></div>
+      <div class="card-ovr-box"><div class="card-ovr-num">${ovr!==null?ovr:'—'}</div><div class="card-ovr-label">OVR</div></div>
+    </div>
+    <div class="attr-grid">${rows}</div>
+    <div style="height:16px;"></div>`;
+  document.getElementById('modal').classList.add('open');
+}
+
+function closeModal(e){if(e.target===document.getElementById('modal'))document.getElementById('modal').classList.remove('open');}
+
+function switchTab(tab,e){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  e.target.classList.add('active');
+  document.getElementById('view-'+tab).classList.add('active');
+  if(tab==='leaderboard')buildLeaderboard();
+  if(tab==='rate'&&unlocked)buildPlayerSelect();
+}
+
+async function init(){await dbFetch();buildLeaderboard();}
+init();
+</script>
+</body>
+</html>
