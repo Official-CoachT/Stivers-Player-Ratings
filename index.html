@@ -74,6 +74,12 @@
   .name-input { font-family: var(--font-display); color: white; font-size: 18px; font-weight: 700; line-height: 1.2; background: transparent; border: none; border-bottom: 1px dashed rgba(255,255,255,0.4); width: 100%; padding: 2px 0; }
   .name-input:focus { outline: none; border-bottom-color: var(--orange-light); }
   .card-pos { color: var(--orange-light); font-size: 12px; letter-spacing: 0.05em; margin-top: 3px; }
+  .edit-row { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+  .edit-row span { color: var(--orange-light); font-size: 12px; }
+  .pos-select { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); border-radius: 5px; color: white; font-size: 12px; font-family: var(--font-body); padding: 3px 6px; }
+  .pos-select:focus { outline: none; border-color: var(--orange-light); }
+  .num-input { width: 40px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); border-radius: 5px; color: white; font-size: 12px; font-family: var(--font-body); padding: 3px 4px; text-align: center; }
+  .num-input:focus { outline: none; border-color: var(--orange-light); }
   .card-ovr-box { text-align: center; background: rgba(224,122,41,0.15); border-radius: 10px; padding: 8px 14px; min-width: 72px; border: 1px solid var(--orange); }
   .card-ovr-num { font-family: var(--font-display); color: var(--orange-light); font-size: 28px; font-weight: 700; line-height: 1; }
   .card-ovr-label { color: rgba(255,255,255,0.7); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
@@ -95,6 +101,12 @@
   .attr-bar.good { background: var(--brown-light); }
   .attr-bar.avg { background: #C68A4A; }
   .attr-bar.awareness-bar { background: var(--orange); }
+  .quiz-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+  .quiz-meta { font-size: 11px; color: var(--gray); flex: 1; }
+  .quiz-input { width: 56px; padding: 6px; font-size: 13px; text-align: center; border: 2px solid var(--border); border-radius: 6px; }
+  .quiz-input:focus { outline: none; border-color: var(--orange); }
+  .quiz-log-btn { padding: 6px 12px; background: var(--brown); color: var(--orange-light); border: none; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .quiz-log-btn:active { background: var(--brown-dark); }
 
   .save-btn { width: calc(100% - 36px); margin: 16px 18px; padding: 14px; background: var(--brown); color: var(--orange-light); font-size: 15px; font-weight: 700; border: none; border-radius: 10px; cursor: pointer; letter-spacing: 0.04em; transition: background 0.2s; font-family: var(--font-body); }
   .save-btn:active { background: var(--brown-dark); }
@@ -156,7 +168,11 @@
         <div class="card-avatar" id="card-avatar">—</div>
         <div class="card-name-wrap">
           <input class="name-input" id="name-input" oninput="onNameEdit()">
-          <div class="card-pos" id="card-pos">—</div>
+          <div class="edit-row">
+            <select class="pos-select" id="pos-select" onchange="onPosEdit()"></select>
+            <span>#</span>
+            <input type="number" class="num-input" id="num-input" min="0" max="99" oninput="onNumEdit()">
+          </div>
         </div>
         <div class="card-ovr-box">
           <div class="card-ovr-num" id="card-ovr">—</div>
@@ -220,18 +236,58 @@ const POSITION_WEIGHTS={
   ST:  {pace:0.20,shooting:0.30,passing:0.10,dribbling:0.15,defending:0.05,physical:0.10,awareness:0.10}
 };
 
-let db={};let sel=null;let unlocked=false;
+let db={};let sel=null;let unlocked=false;let quizScores={};
 
 function playerById(id){ return PLAYERS.find(p=>p.id===id); }
 function displayName(id){ const r=db[id]; return (r&&r.display_name)?r.display_name:playerById(id).name; }
+function playerPos(id){ const r=db[id]; return (r&&r.position)?r.position:playerById(id).pos; }
+function playerNum(id){ const r=db[id]; return (r&&r.jersey_num)?r.jersey_num:playerById(id).num; }
 function initials(name){ return name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); }
+
+async function dbFetchQuiz(){
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/quiz_scores?select=player_id,score`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+    const rows=await r.json();
+    quizScores={};
+    if(Array.isArray(rows)) rows.forEach(row=>{
+      if(!quizScores[row.player_id]) quizScores[row.player_id]=[];
+      quizScores[row.player_id].push(Number(row.score));
+    });
+  }catch(e){console.error(e);}
+}
+
+function quizAvg(id){
+  const list=quizScores[id];
+  if(!list||list.length===0) return null;
+  return Math.round(list.reduce((a,b)=>a+b,0)/list.length);
+}
+
+async function logQuizScore(id){
+  const input=document.getElementById('quiz-input');
+  const score=Math.min(99,Math.max(1,parseInt(input.value)||0));
+  if(!score) return;
+  await fetch(`${SB_URL}/rest/v1/quiz_scores`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({player_id:id,score})});
+  if(!quizScores[id]) quizScores[id]=[];
+  quizScores[id].push(score);
+  input.value='';
+  const avg=quizAvg(id);
+  if(!db[id])db[id]={};
+  db[id].awareness=avg;
+  document.getElementById('val-Awareness').textContent=avg;
+  const pct=avg/99*100;
+  const bar=document.getElementById('bar-Awareness');
+  bar.style.width=pct+'%';
+  bar.className='attr-bar awareness-bar';
+  document.getElementById('quiz-meta').textContent=`Quiz avg: ${avg} (${quizScores[id].length} logged)`;
+  updateOVR();
+}
 
 async function dbFetch(){
   try{
     const r=await fetch(`${SB_URL}/rest/v1/${TABLE}?select=*`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
     const rows=await r.json();
     db={};
-    if(Array.isArray(rows)) rows.forEach(r=>{db[r.id]={display_name:r.display_name,pace:r.pace,shooting:r.shooting,passing:r.passing,dribbling:r.dribbling,defending:r.defending,physical:r.physical,awareness:r.awareness};});
+    if(Array.isArray(rows)) rows.forEach(r=>{db[r.id]={display_name:r.display_name,position:r.position,jersey_num:r.jersey_num,pace:r.pace,shooting:r.shooting,passing:r.passing,dribbling:r.dribbling,defending:r.defending,physical:r.physical,awareness:r.awareness};});
   }catch(e){console.error(e);}
 }
 
@@ -242,7 +298,7 @@ async function dbUpsert(id,data){
 function calcOVR(id){
   const r=db[id];const p=playerById(id);
   if(!r||!p) return null;
-  const w=POSITION_WEIGHTS[p.pos];
+  const w=POSITION_WEIGHTS[playerPos(id)];
   const vals=[r.pace,r.shooting,r.passing,r.dribbling,r.defending,r.physical,r.awareness];
   if(vals.some(v=>!v)) return null;
   return Math.round(r.pace*w.pace+r.shooting*w.shooting+r.passing*w.passing+r.dribbling*w.dribbling+r.defending*w.defending+r.physical*w.physical+r.awareness*w.awareness);
@@ -263,9 +319,9 @@ function buildLeaderboard(){
     div.className='lb-card'+(p.ovr===null?' unrated':'');
     div.onclick=()=>openModal(p.id);
     div.innerHTML=`
-      <div class="lb-avatar">${initials(name)}<span class="num">${p.num}</span></div>
+      <div class="lb-avatar">${initials(name)}<span class="num">${playerNum(p.id)}</span></div>
       <div class="lb-name">${name}</div>
-      <div class="lb-pos">${p.pos}</div>
+      <div class="lb-pos">${playerPos(p.id)}</div>
       <div class="lb-ovr ${ovrClass(p.ovr)}">${p.ovr!==null?p.ovr:'—'}</div>
       <span class="lb-ovr-label">OVR</span>`;
     grid.appendChild(div);
@@ -297,7 +353,10 @@ function selectPlayer(id){
   document.getElementById('card-panel').style.display='block';
   document.getElementById('card-avatar').textContent=initials(displayName(id));
   document.getElementById('name-input').value=displayName(id);
-  document.getElementById('card-pos').textContent=`${p.pos} · #${p.num}`;
+  const posSelect=document.getElementById('pos-select');
+  posSelect.innerHTML=Object.keys(POSITION_WEIGHTS).map(pos=>`<option value="${pos}">${pos}</option>`).join('');
+  posSelect.value=playerPos(id);
+  document.getElementById('num-input').value=playerNum(id);
   const grid=document.getElementById('attr-grid');
   grid.innerHTML='';
   const r=db[id]||{};
@@ -318,7 +377,12 @@ function selectPlayer(id){
           <button type="button" class="step-btn" onclick="stepAttr('${attr}',1)">+</button>
         </div>
         <div class="attr-bar-wrap"><div class="${barClass}" id="bar-${attr}" style="width:${pct}%"></div></div>
-      </div>`;
+      </div>
+      ${isAwareness?`<div class="quiz-row">
+        <span class="quiz-meta" id="quiz-meta">${(()=>{const avg=quizAvg(id);return avg!==null?`Quiz avg: ${avg} (${quizScores[id].length} logged)`:'No quizzes logged yet';})()}</span>
+        <input type="number" min="1" max="99" class="quiz-input" id="quiz-input" placeholder="score">
+        <button type="button" class="quiz-log-btn" onclick="logQuizScore('${id}')">Log</button>
+      </div>`:''}`;
     grid.appendChild(div);
   });
   updateOVR();
@@ -329,6 +393,19 @@ function onNameEdit(){
   if(!db[sel])db[sel]={};
   db[sel].display_name=document.getElementById('name-input').value;
   document.getElementById('card-avatar').textContent=initials(document.getElementById('name-input').value||playerById(sel).name);
+}
+
+function onPosEdit(){
+  if(!sel)return;
+  if(!db[sel])db[sel]={};
+  db[sel].position=document.getElementById('pos-select').value;
+  updateOVR();
+}
+
+function onNumEdit(){
+  if(!sel)return;
+  if(!db[sel])db[sel]={};
+  db[sel].jersey_num=parseInt(document.getElementById('num-input').value)||0;
 }
 
 function stepAttr(attr,dir){
@@ -357,7 +434,7 @@ async function saveRatings(){
   const btn=document.getElementById('save-btn');
   btn.disabled=true;btn.textContent='SAVING...';
   const r=db[sel]||{};
-  await dbUpsert(sel,{display_name:r.display_name||playerById(sel).name,pace:r.pace||50,shooting:r.shooting||50,passing:r.passing||50,dribbling:r.dribbling||50,defending:r.defending||50,physical:r.physical||50,awareness:r.awareness||50});
+  await dbUpsert(sel,{display_name:r.display_name||playerById(sel).name,position:r.position||playerById(sel).pos,jersey_num:r.jersey_num||playerById(sel).num,pace:r.pace||50,shooting:r.shooting||50,passing:r.passing||50,dribbling:r.dribbling||50,defending:r.defending||50,physical:r.physical||50,awareness:r.awareness||50});
   btn.disabled=false;btn.textContent='SAVE RATINGS';
   buildPlayerSelect();
   const t=document.getElementById('toast');t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);
@@ -375,7 +452,7 @@ function openModal(id){
   document.getElementById('modal-body').innerHTML=`
     <div class="card-header" style="border-radius:0;">
       <div class="card-avatar">${initials(name)}</div>
-      <div class="card-name-wrap"><div class="modal-name">${name}</div><div class="card-pos">${p.pos} · #${p.num}</div></div>
+      <div class="card-name-wrap"><div class="modal-name">${name}</div><div class="card-pos">${playerPos(id)} · #${playerNum(id)}</div></div>
       <div class="card-ovr-box"><div class="card-ovr-num">${ovr!==null?ovr:'—'}</div><div class="card-ovr-label">OVR</div></div>
     </div>
     <div class="attr-grid">${rows}</div>
@@ -394,7 +471,7 @@ function switchTab(tab,e){
   if(tab==='rate'&&unlocked)buildPlayerSelect();
 }
 
-async function init(){await dbFetch();buildLeaderboard();}
+async function init(){await dbFetch();await dbFetchQuiz();buildLeaderboard();}
 init();
 </script>
 </body>
