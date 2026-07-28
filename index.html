@@ -61,6 +61,13 @@
   .pw-error { color: #BB0000; font-size: 13px; margin-top: 10px; display: none; }
 
   .player-select { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+  .add-player-row { display: flex; gap: 6px; margin-bottom: 14px; }
+  .add-name-input { flex: 2; min-width: 0; padding: 10px; border: 2px solid var(--border); border-radius: 8px; font-size: 13px; font-family: var(--font-body); }
+  .add-name-input:focus { outline: none; border-color: var(--orange); }
+  .add-pos-select { flex: 1; padding: 10px 4px; border: 2px solid var(--border); border-radius: 8px; font-size: 13px; font-family: var(--font-body); }
+  .add-num-input { width: 44px; padding: 10px 4px; border: 2px solid var(--border); border-radius: 8px; font-size: 13px; text-align: center; font-family: var(--font-body); }
+  .add-btn { padding: 10px 12px; background: var(--brown); color: var(--orange-light); border: none; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; font-family: var(--font-body); }
+  .add-btn:active { background: var(--brown-dark); }
   .player-btn { background: white; border: 2px solid var(--border); border-radius: 10px; padding: 10px 6px; text-align: center; font-size: 13px; font-weight: 600; color: var(--gray-dark); cursor: pointer; transition: all 0.15s; font-family: var(--font-body); }
   .player-btn:active { transform: scale(0.96); }
   .player-btn.rated { border-color: var(--orange); background: #FFFBEF; }
@@ -111,6 +118,8 @@
   .save-btn { width: calc(100% - 36px); margin: 16px 18px; padding: 14px; background: var(--brown); color: var(--orange-light); font-size: 15px; font-weight: 700; border: none; border-radius: 10px; cursor: pointer; letter-spacing: 0.04em; transition: background 0.2s; font-family: var(--font-body); }
   .save-btn:active { background: var(--brown-dark); }
   .save-btn:disabled { background: #aaa; cursor: not-allowed; }
+  .remove-btn { width: calc(100% - 36px); margin: 0 18px 16px; padding: 11px; background: transparent; color: #B23A2E; border: 1.5px solid #B23A2E; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--font-body); }
+  .remove-btn:active { background: rgba(178,58,46,0.1); }
 
   .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; align-items: flex-end; justify-content: center; }
   .modal-overlay.open { display: flex; }
@@ -162,6 +171,12 @@
     </div>
   </div>
   <div id="rate-interface" style="display:none;">
+    <div class="add-player-row">
+      <input type="text" id="new-player-name" placeholder="New player name" class="add-name-input">
+      <select id="new-player-pos" class="add-pos-select"></select>
+      <input type="number" id="new-player-num" placeholder="#" class="add-num-input" min="0" max="99">
+      <button type="button" class="add-btn" onclick="addPlayer()">+ Add</button>
+    </div>
     <div class="player-select" id="player-select"></div>
     <div class="card-panel" id="card-panel" style="display:none;">
       <div class="card-header">
@@ -181,6 +196,7 @@
       </div>
       <div class="attr-grid" id="attr-grid"></div>
       <button class="save-btn" id="save-btn" onclick="saveRatings()">SAVE RATINGS</button>
+      <button class="remove-btn" onclick="removePlayer()">Remove Player From Roster</button>
     </div>
     <div style="height:20px"></div>
   </div>
@@ -198,10 +214,11 @@ const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const TABLE="stivers_ratings";
 const COACH_PW="Th3WidowsS0n0523!";
 
-// Roster: id is a stable key (never changes — this is what links to saved ratings).
-// name is the default display name; can be overridden per-player in the admin panel
-// without touching this file (e.g. if you only have a first name here, edit it live).
-const PLAYERS=[
+// One-time starting roster. Once the site runs, the database is the source of
+// truth for who's on the team — add/remove players in the admin panel from here
+// on out. This array only matters the very first time the site loads (it backfills
+// the database), so editing it later won't add or remove anyone.
+const INITIAL_SEED=[
   {id:"king",name:"King",num:1,pos:"GK"},
   {id:"isaac",name:"Isaac",num:4,pos:"CB"},
   {id:"rey",name:"Rey",num:5,pos:"CB"},
@@ -236,13 +253,21 @@ const POSITION_WEIGHTS={
   ST:  {pace:0.20,shooting:0.30,passing:0.10,dribbling:0.15,defending:0.05,physical:0.10,awareness:0.10}
 };
 
-let db={};let sel=null;let unlocked=false;let quizScores={};
+let db={};let sel=null;let unlocked=false;let quizScores={};let roster=[];
 
-function playerById(id){ return PLAYERS.find(p=>p.id===id); }
-function displayName(id){ const r=db[id]; return (r&&r.display_name)?r.display_name:playerById(id).name; }
-function playerPos(id){ const r=db[id]; return (r&&r.position)?r.position:playerById(id).pos; }
-function playerNum(id){ const r=db[id]; return (r&&r.jersey_num)?r.jersey_num:playerById(id).num; }
+function seedPlayer(id){ return INITIAL_SEED.find(p=>p.id===id); }
+function displayName(id){ return (db[id]&&db[id].display_name)||(seedPlayer(id)&&seedPlayer(id).name)||'Unnamed'; }
+function playerPos(id){ return (db[id]&&db[id].position)||(seedPlayer(id)&&seedPlayer(id).pos)||'CM'; }
+function playerNum(id){ const n=db[id]&&db[id].jersey_num; return (n!==undefined&&n!==null)?n:((seedPlayer(id)&&seedPlayer(id).num)??'-'); }
 function initials(name){ return name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); }
+
+async function seedMissingPlayers(){
+  const missing=INITIAL_SEED.filter(p=>!db[p.id]);
+  for(const p of missing){
+    db[p.id]={display_name:p.name,position:p.pos,jersey_num:p.num};
+    await dbUpsert(p.id,{display_name:p.name,position:p.pos,jersey_num:p.num});
+  }
+}
 
 async function dbFetchQuiz(){
   try{
@@ -296,8 +321,8 @@ async function dbUpsert(id,data){
 }
 
 function calcOVR(id){
-  const r=db[id];const p=playerById(id);
-  if(!r||!p) return null;
+  const r=db[id];
+  if(!r) return null;
   const w=POSITION_WEIGHTS[playerPos(id)];
   const vals=[r.pace,r.shooting,r.passing,r.dribbling,r.defending,r.physical,r.awareness];
   if(vals.some(v=>!v)) return null;
@@ -308,7 +333,7 @@ function ovrClass(v){if(v===null)return'dev';if(v>=90)return'high';if(v>=80)retu
 
 function buildLeaderboard(){
   const grid=document.getElementById('lb-grid');
-  const ranked=PLAYERS.map(p=>({...p,ovr:calcOVR(p.id)})).sort((a,b)=>{
+  const ranked=roster.map(id=>({id,ovr:calcOVR(id)})).sort((a,b)=>{
     if(a.ovr===null&&b.ovr===null)return 0;
     if(a.ovr===null)return 1;if(b.ovr===null)return -1;return b.ovr-a.ovr;
   });
@@ -335,21 +360,56 @@ function checkPW(){
 }
 
 function buildPlayerSelect(){
+  const addPos=document.getElementById('new-player-pos');
+  if(addPos.options.length===0){
+    addPos.innerHTML=Object.keys(POSITION_WEIGHTS).map(pos=>`<option value="${pos}">${pos}</option>`).join('');
+  }
   const wrap=document.getElementById('player-select');
   wrap.innerHTML='';
-  PLAYERS.forEach(p=>{
-    const ovr=calcOVR(p.id);
+  roster.forEach(id=>{
+    const ovr=calcOVR(id);
     const btn=document.createElement('button');
-    btn.className='player-btn'+(ovr!==null?' rated':'')+(sel===p.id?' selected':'');
-    btn.innerHTML=`${displayName(p.id)}<span class="mini-ovr">${ovr!==null?ovr:'—'}</span>`;
-    btn.onclick=()=>selectPlayer(p.id);
+    btn.className='player-btn'+(ovr!==null?' rated':'')+(sel===id?' selected':'');
+    btn.innerHTML=`${displayName(id)}<span class="mini-ovr">${ovr!==null?ovr:'—'}</span>`;
+    btn.onclick=()=>selectPlayer(id);
     wrap.appendChild(btn);
   });
 }
 
+async function addPlayer(){
+  const nameInput=document.getElementById('new-player-name');
+  const posInput=document.getElementById('new-player-pos');
+  const numInput=document.getElementById('new-player-num');
+  const name=nameInput.value.trim();
+  if(!name) return;
+  let id=name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'player';
+  let n=1;
+  while(db[id]){ id=id+'-'+n; n++; }
+  const pos=posInput.value||'CM';
+  const num=parseInt(numInput.value)||0;
+  db[id]={display_name:name,position:pos,jersey_num:num};
+  roster.push(id);
+  await dbUpsert(id,{display_name:name,position:pos,jersey_num:num});
+  nameInput.value='';numInput.value='';
+  buildPlayerSelect();
+  buildLeaderboard();
+}
+
+async function removePlayer(){
+  if(!sel) return;
+  if(!confirm(`Remove ${displayName(sel)} from the roster? This deletes their saved ratings and quiz history too.`)) return;
+  await fetch(`${SB_URL}/rest/v1/${TABLE}?id=eq.${encodeURIComponent(sel)}`,{method:"DELETE",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+  delete db[sel];
+  delete quizScores[sel];
+  roster=roster.filter(id=>id!==sel);
+  sel=null;
+  document.getElementById('card-panel').style.display='none';
+  buildPlayerSelect();
+  buildLeaderboard();
+}
+
 function selectPlayer(id){
   sel=id;buildPlayerSelect();
-  const p=playerById(id);
   document.getElementById('card-panel').style.display='block';
   document.getElementById('card-avatar').textContent=initials(displayName(id));
   document.getElementById('name-input').value=displayName(id);
@@ -392,7 +452,7 @@ function onNameEdit(){
   if(!sel)return;
   if(!db[sel])db[sel]={};
   db[sel].display_name=document.getElementById('name-input').value;
-  document.getElementById('card-avatar').textContent=initials(document.getElementById('name-input').value||playerById(sel).name);
+  document.getElementById('card-avatar').textContent=initials(document.getElementById('name-input').value||displayName(sel));
 }
 
 function onPosEdit(){
@@ -434,14 +494,14 @@ async function saveRatings(){
   const btn=document.getElementById('save-btn');
   btn.disabled=true;btn.textContent='SAVING...';
   const r=db[sel]||{};
-  await dbUpsert(sel,{display_name:r.display_name||playerById(sel).name,position:r.position||playerById(sel).pos,jersey_num:r.jersey_num||playerById(sel).num,pace:r.pace||50,shooting:r.shooting||50,passing:r.passing||50,dribbling:r.dribbling||50,defending:r.defending||50,physical:r.physical||50,awareness:r.awareness||50});
+  await dbUpsert(sel,{display_name:document.getElementById('name-input').value||displayName(sel),position:document.getElementById('pos-select').value,jersey_num:parseInt(document.getElementById('num-input').value)||0,pace:r.pace||50,shooting:r.shooting||50,passing:r.passing||50,dribbling:r.dribbling||50,defending:r.defending||50,physical:r.physical||50,awareness:r.awareness||50});
   btn.disabled=false;btn.textContent='SAVE RATINGS';
   buildPlayerSelect();
   const t=document.getElementById('toast');t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);
 }
 
 function openModal(id){
-  const ovr=calcOVR(id);const r=db[id]||{};const p=playerById(id);const name=displayName(id);
+  const ovr=calcOVR(id);const r=db[id]||{};const name=displayName(id);
   const rows=ATTRS.map((a)=>{
     const k=a.toLowerCase();const v=r[k]||'—';const pct=r[k]?(r[k]/99*100):0;
     const isA=a==='Awareness';
@@ -471,7 +531,13 @@ function switchTab(tab,e){
   if(tab==='rate'&&unlocked)buildPlayerSelect();
 }
 
-async function init(){await dbFetch();await dbFetchQuiz();buildLeaderboard();}
+async function init(){
+  await dbFetch();
+  await seedMissingPlayers();
+  roster=Object.keys(db);
+  await dbFetchQuiz();
+  buildLeaderboard();
+}
 init();
 </script>
 </body>
