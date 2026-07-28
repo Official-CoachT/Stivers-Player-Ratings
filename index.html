@@ -266,7 +266,7 @@ const POSITION_WEIGHTS={
 const YEAR_BONUS={FR:0,SO:2,JR:4,SR:6};
 const YEARS=["FR","SO","JR","SR"];
 
-let db={};let sel=null;let unlocked=false;let quizScores={};let roster=[];
+let db={};let sel=null;let unlocked=false;let quizScores={};let sprintTimes={};let manuScores={};let roster=[];
 
 function seedPlayer(id){ return INITIAL_SEED.find(p=>p.id===id); }
 function displayName(id){ return (db[id]&&db[id].display_name)||(seedPlayer(id)&&seedPlayer(id).name)||'Unnamed'; }
@@ -301,15 +301,49 @@ function quizAvg(id){
   return Math.round(list.reduce((a,b)=>a+b,0)/list.length);
 }
 
+// Averages whichever inputs actually exist yet (ignores missing ones).
+function blendValues(vals){
+  const present=vals.filter(v=>v!=null);
+  if(present.length===0) return null;
+  return Math.round(present.reduce((a,b)=>a+b,0)/present.length);
+}
+
 // Blends your own manual awareness judgment with the logged quiz average.
-// If only one of the two exists yet, that one is used on its own.
 function effectiveAwareness(id){
-  const manual=db[id]&&db[id].awareness;
-  const qAvg=quizAvg(id);
-  if(manual==null&&qAvg==null) return null;
-  if(manual==null) return qAvg;
-  if(qAvg==null) return manual;
-  return Math.round((manual+qAvg)/2);
+  return blendValues([db[id]&&db[id].awareness, quizAvg(id)]);
+}
+
+// Sprint times scored relative to the whole team's own fastest/slowest logged
+// time (fastest = 99, slowest = a 50 floor), using each player's personal best.
+function teamSprintRange(){
+  let all=[];
+  Object.values(sprintTimes).forEach(arr=>{all=all.concat(arr);});
+  if(all.length===0) return null;
+  return {min:Math.min(...all),max:Math.max(...all)};
+}
+function sprintScore(id){
+  const list=sprintTimes[id];
+  if(!list||list.length===0) return null;
+  const best=Math.min(...list);
+  const range=teamSprintRange();
+  if(!range||range.max===range.min) return 99;
+  const score=99-((best-range.min)/(range.max-range.min))*49;
+  return Math.round(Math.max(50,Math.min(99,score)));
+}
+
+// Man U Test: reps out of 20, scaled so 20/20 = 99 and 15/20 (the stated goal)
+// lands around 74 — solidly "Good," not automatically elite.
+function manuScore(id){
+  const list=manuScores[id];
+  if(!list||list.length===0) return null;
+  const best=Math.max(...list);
+  return Math.min(99,Math.round((best/20)*99));
+}
+
+// Blends your manual pace judgment with sprint-time and Man U Test data —
+// uses whichever of the three exist so far.
+function effectivePace(id){
+  return blendValues([db[id]&&db[id].pace, sprintScore(id), manuScore(id)]);
 }
 
 async function logQuizScore(id){
@@ -330,6 +364,68 @@ function updateBlendDisplay(id){
   if(el) el.textContent=effectiveAwareness(id)??'—';
 }
 
+async function dbFetchSprints(){
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/sprint_times?select=player_id,time_seconds`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+    const rows=await r.json();
+    sprintTimes={};
+    if(Array.isArray(rows)) rows.forEach(row=>{
+      if(!sprintTimes[row.player_id]) sprintTimes[row.player_id]=[];
+      sprintTimes[row.player_id].push(Number(row.time_seconds));
+    });
+  }catch(e){console.error(e);}
+}
+
+async function dbFetchManU(){
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/manu_scores?select=player_id,reps`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+    const rows=await r.json();
+    manuScores={};
+    if(Array.isArray(rows)) rows.forEach(row=>{
+      if(!manuScores[row.player_id]) manuScores[row.player_id]=[];
+      manuScores[row.player_id].push(Number(row.reps));
+    });
+  }catch(e){console.error(e);}
+}
+
+async function logSprintTime(id){
+  const input=document.getElementById('sprint-input');
+  const t=parseFloat(input.value);
+  if(!t||t<=0) return;
+  await fetch(`${SB_URL}/rest/v1/sprint_times`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({player_id:id,time_seconds:t})});
+  if(!sprintTimes[id]) sprintTimes[id]=[];
+  sprintTimes[id].push(t);
+  input.value='';
+  refreshPaceExtra(id);
+  updateOVR();
+}
+
+async function logManU(id){
+  const input=document.getElementById('manu-input');
+  const reps=Math.min(20,Math.max(0,parseInt(input.value)||0));
+  await fetch(`${SB_URL}/rest/v1/manu_scores`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({player_id:id,reps})});
+  if(!manuScores[id]) manuScores[id]=[];
+  manuScores[id].push(reps);
+  input.value='';
+  refreshPaceExtra(id);
+  updateOVR();
+}
+
+function refreshPaceExtra(id){
+  const sMeta=document.getElementById('sprint-meta');
+  if(sMeta){
+    const list=sprintTimes[id];
+    sMeta.textContent=list&&list.length?`Best: ${Math.min(...list)}s (${list.length} logged)`:'No times logged yet';
+  }
+  const mMeta=document.getElementById('manu-meta');
+  if(mMeta){
+    const list=manuScores[id];
+    mMeta.textContent=list&&list.length?`Best: ${Math.max(...list)}/20 (${list.length} logged)`:'No attempts logged yet';
+  }
+  const blendEl=document.getElementById('pace-blend-val');
+  if(blendEl) blendEl.textContent=effectivePace(id)??'—';
+}
+
 async function dbFetch(){
   try{
     const r=await fetch(`${SB_URL}/rest/v1/${TABLE}?select=*`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
@@ -348,12 +444,13 @@ function calcOVR(id){
   if(!r) return null;
   const w=POSITION_WEIGHTS[playerPos(id)];
   const bonus=YEAR_BONUS[playerYear(id)]||0;
+  const pace=effectivePace(id);
   const awareness=effectiveAwareness(id);
-  const vals=[r.pace,r.shooting,r.passing,r.dribbling,r.defending,r.physical,awareness];
+  const vals=[pace,r.shooting,r.passing,r.dribbling,r.defending,r.physical,awareness];
   if(vals.some(v=>!v)) return null;
   const physicalBoosted=Math.min(99,r.physical+bonus);
   const awarenessBoosted=Math.min(99,awareness+bonus);
-  return Math.round(r.pace*w.pace+r.shooting*w.shooting+r.passing*w.passing+r.dribbling*w.dribbling+r.defending*w.defending+physicalBoosted*w.physical+awarenessBoosted*w.awareness);
+  return Math.round(pace*w.pace+r.shooting*w.shooting+r.passing*w.passing+r.dribbling*w.dribbling+r.defending*w.defending+physicalBoosted*w.physical+awarenessBoosted*w.awareness);
 }
 
 function ovrClass(v){if(v===null)return'dev';if(v>=90)return'high';if(v>=80)return'good';if(v>=70)return'avg';return'dev';}
@@ -461,11 +558,12 @@ function selectPlayer(id){
     const val=r[key]||50;
     const pct=val/99*100;
     const isAwareness=attr==='Awareness';
-    const barClass=isAwareness?'attr-bar awareness-bar':(val>=90?'attr-bar high':val>=80?'attr-bar good':'attr-bar avg');
+    const isPace=attr==='Pace';
+    const barClass=(isAwareness||isPace)?'attr-bar awareness-bar':(val>=90?'attr-bar high':val>=80?'attr-bar good':'attr-bar avg');
     const div=document.createElement('div');
-    div.className='attr-row'+(isAwareness?' full-width':'');
+    div.className='attr-row'+((isAwareness||isPace)?' full-width':'');
     div.innerHTML=`
-      <div class="attr-label${isAwareness?' awareness':''}">${attr}${isAwareness?' <span class="attr-sublabel">(your read)</span>':''}</div>
+      <div class="attr-label${(isAwareness||isPace)?' awareness':''}">${attr}${(isAwareness||isPace)?' <span class="attr-sublabel">(your read)</span>':''}</div>
       <div class="attr-input-row">
         <div class="stepper">
           <button type="button" class="step-btn" onclick="stepAttr('${attr}',-1)">−</button>
@@ -479,7 +577,18 @@ function selectPlayer(id){
         <input type="number" min="1" max="99" class="quiz-input" id="quiz-input" placeholder="score">
         <button type="button" class="quiz-log-btn" onclick="logQuizScore('${id}')">Log</button>
       </div>
-      <div class="blend-row">Blended for OVR: <strong id="blend-val">${effectiveAwareness(id)??'—'}</strong></div>`:''}`;
+      <div class="blend-row">Blended for OVR: <strong id="blend-val">${effectiveAwareness(id)??'—'}</strong></div>`:''}
+      ${isPace?`<div class="quiz-row">
+        <span class="quiz-meta" id="sprint-meta">${(()=>{const list=sprintTimes[id];return list&&list.length?`Best: ${Math.min(...list)}s (${list.length} logged)`:'No times logged yet';})()}</span>
+        <input type="number" step="0.01" min="0" class="quiz-input" id="sprint-input" placeholder="secs">
+        <button type="button" class="quiz-log-btn" onclick="logSprintTime('${id}')">Log</button>
+      </div>
+      <div class="quiz-row">
+        <span class="quiz-meta" id="manu-meta">${(()=>{const list=manuScores[id];return list&&list.length?`Best: ${Math.max(...list)}/20 (${list.length} logged)`:'No attempts logged yet';})()}</span>
+        <input type="number" min="0" max="20" class="quiz-input" id="manu-input" placeholder="/20">
+        <button type="button" class="quiz-log-btn" onclick="logManU('${id}')">Log</button>
+      </div>
+      <div class="blend-row">Blended for OVR: <strong id="pace-blend-val">${effectivePace(id)??'—'}</strong></div>`:''}`;
     grid.appendChild(div);
   });
   updateOVR();
@@ -524,8 +633,10 @@ function stepAttr(attr,dir){
   const bar=document.getElementById(`bar-${attr}`);
   bar.style.width=pct+'%';
   const isA=attr==='Awareness';
+  const isP=attr==='Pace';
   bar.className=isA?'attr-bar awareness-bar':(val>=90?'attr-bar high':val>=80?'attr-bar good':'attr-bar avg');
   if(isA) updateBlendDisplay(sel);
+  if(isP) refreshPaceExtra(sel);
   updateOVR();
 }
 
@@ -550,11 +661,12 @@ function openModal(id){
   const rows=ATTRS.map((a)=>{
     const k=a.toLowerCase();
     const isA=a==='Awareness';
-    const rawVal=isA?effectiveAwareness(id):r[k];
+    const isP=a==='Pace';
+    const rawVal=isA?effectiveAwareness(id):(isP?effectivePace(id):r[k]);
     const v=rawVal||'—';const pct=rawVal?(rawVal/99*100):0;
-    const bc=isA?'attr-bar awareness-bar':(rawVal>=90?'attr-bar high':rawVal>=80?'attr-bar good':'attr-bar avg');
-    const fw=isA?' style="grid-column:1/-1;border-right:none;"':'';
-    return`<div class="attr-row"${fw}><div class="attr-label${isA?' awareness':''}">${a}</div><div class="attr-input-row"><div style="width:64px;text-align:center;font-family:var(--font-display);font-size:22px;font-weight:700;color:var(--brown);">${v}</div><div class="attr-bar-wrap"><div class="${bc}" style="width:${pct}%"></div></div></div></div>`;
+    const bc=(isA||isP)?'attr-bar awareness-bar':(rawVal>=90?'attr-bar high':rawVal>=80?'attr-bar good':'attr-bar avg');
+    const fw=(isA||isP)?' style="grid-column:1/-1;border-right:none;"':'';
+    return`<div class="attr-row"${fw}><div class="attr-label${(isA||isP)?' awareness':''}">${a}</div><div class="attr-input-row"><div style="width:64px;text-align:center;font-family:var(--font-display);font-size:22px;font-weight:700;color:var(--brown);">${v}</div><div class="attr-bar-wrap"><div class="${bc}" style="width:${pct}%"></div></div></div></div>`;
   }).join('');
   document.getElementById('modal-body').innerHTML=`
     <div class="card-header" style="border-radius:0;">
@@ -583,6 +695,8 @@ async function init(){
   await seedMissingPlayers();
   roster=Object.keys(db);
   await dbFetchQuiz();
+  await dbFetchSprints();
+  await dbFetchManU();
   buildLeaderboard();
 }
 init();
