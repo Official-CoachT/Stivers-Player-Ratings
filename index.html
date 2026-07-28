@@ -97,6 +97,9 @@
   .attr-row.full-width { grid-column: 1 / -1; border-right: none; }
   .attr-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray); margin-bottom: 6px; }
   .attr-label.awareness { color: var(--brown); }
+  .attr-sublabel { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--gray); font-size: 10px; }
+  .blend-row { font-size: 12px; color: var(--brown); font-weight: 600; margin-top: 8px; }
+  .blend-row strong { font-family: var(--font-display); font-size: 15px; }
   .attr-input-row { display: flex; align-items: center; gap: 8px; }
   .stepper { display: flex; align-items: center; gap: 4px; }
   .step-btn { width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--border); background: var(--gray-xlight); font-size: 15px; font-weight: 700; color: var(--brown); cursor: pointer; display: flex; align-items: center; justify-content: center; }
@@ -287,6 +290,17 @@ function quizAvg(id){
   return Math.round(list.reduce((a,b)=>a+b,0)/list.length);
 }
 
+// Blends your own manual awareness judgment with the logged quiz average.
+// If only one of the two exists yet, that one is used on its own.
+function effectiveAwareness(id){
+  const manual=db[id]&&db[id].awareness;
+  const qAvg=quizAvg(id);
+  if(manual==null&&qAvg==null) return null;
+  if(manual==null) return qAvg;
+  if(qAvg==null) return manual;
+  return Math.round((manual+qAvg)/2);
+}
+
 async function logQuizScore(id){
   const input=document.getElementById('quiz-input');
   const score=Math.min(99,Math.max(1,parseInt(input.value)||0));
@@ -295,16 +309,14 @@ async function logQuizScore(id){
   if(!quizScores[id]) quizScores[id]=[];
   quizScores[id].push(score);
   input.value='';
-  const avg=quizAvg(id);
-  if(!db[id])db[id]={};
-  db[id].awareness=avg;
-  document.getElementById('val-Awareness').textContent=avg;
-  const pct=avg/99*100;
-  const bar=document.getElementById('bar-Awareness');
-  bar.style.width=pct+'%';
-  bar.className='attr-bar awareness-bar';
-  document.getElementById('quiz-meta').textContent=`Quiz avg: ${avg} (${quizScores[id].length} logged)`;
+  document.getElementById('quiz-meta').textContent=`Quiz avg: ${quizAvg(id)} (${quizScores[id].length} logged)`;
+  updateBlendDisplay(id);
   updateOVR();
+}
+
+function updateBlendDisplay(id){
+  const el=document.getElementById('blend-val');
+  if(el) el.textContent=effectiveAwareness(id)??'—';
 }
 
 async function dbFetch(){
@@ -324,9 +336,10 @@ function calcOVR(id){
   const r=db[id];
   if(!r) return null;
   const w=POSITION_WEIGHTS[playerPos(id)];
-  const vals=[r.pace,r.shooting,r.passing,r.dribbling,r.defending,r.physical,r.awareness];
+  const awareness=effectiveAwareness(id);
+  const vals=[r.pace,r.shooting,r.passing,r.dribbling,r.defending,r.physical,awareness];
   if(vals.some(v=>!v)) return null;
-  return Math.round(r.pace*w.pace+r.shooting*w.shooting+r.passing*w.passing+r.dribbling*w.dribbling+r.defending*w.defending+r.physical*w.physical+r.awareness*w.awareness);
+  return Math.round(r.pace*w.pace+r.shooting*w.shooting+r.passing*w.passing+r.dribbling*w.dribbling+r.defending*w.defending+r.physical*w.physical+awareness*w.awareness);
 }
 
 function ovrClass(v){if(v===null)return'dev';if(v>=90)return'high';if(v>=80)return'good';if(v>=70)return'avg';return'dev';}
@@ -429,7 +442,7 @@ function selectPlayer(id){
     const div=document.createElement('div');
     div.className='attr-row'+(isAwareness?' full-width':'');
     div.innerHTML=`
-      <div class="attr-label${isAwareness?' awareness':''}">${attr}</div>
+      <div class="attr-label${isAwareness?' awareness':''}">${attr}${isAwareness?' <span class="attr-sublabel">(your read)</span>':''}</div>
       <div class="attr-input-row">
         <div class="stepper">
           <button type="button" class="step-btn" onclick="stepAttr('${attr}',-1)">−</button>
@@ -442,7 +455,8 @@ function selectPlayer(id){
         <span class="quiz-meta" id="quiz-meta">${(()=>{const avg=quizAvg(id);return avg!==null?`Quiz avg: ${avg} (${quizScores[id].length} logged)`:'No quizzes logged yet';})()}</span>
         <input type="number" min="1" max="99" class="quiz-input" id="quiz-input" placeholder="score">
         <button type="button" class="quiz-log-btn" onclick="logQuizScore('${id}')">Log</button>
-      </div>`:''}`;
+      </div>
+      <div class="blend-row">Blended for OVR: <strong id="blend-val">${effectiveAwareness(id)??'—'}</strong></div>`:''}`;
     grid.appendChild(div);
   });
   updateOVR();
@@ -481,6 +495,7 @@ function stepAttr(attr,dir){
   bar.style.width=pct+'%';
   const isA=attr==='Awareness';
   bar.className=isA?'attr-bar awareness-bar':(val>=90?'attr-bar high':val>=80?'attr-bar good':'attr-bar avg');
+  if(isA) updateBlendDisplay(sel);
   updateOVR();
 }
 
@@ -503,9 +518,11 @@ async function saveRatings(){
 function openModal(id){
   const ovr=calcOVR(id);const r=db[id]||{};const name=displayName(id);
   const rows=ATTRS.map((a)=>{
-    const k=a.toLowerCase();const v=r[k]||'—';const pct=r[k]?(r[k]/99*100):0;
+    const k=a.toLowerCase();
     const isA=a==='Awareness';
-    const bc=isA?'attr-bar awareness-bar':(r[k]>=90?'attr-bar high':r[k]>=80?'attr-bar good':'attr-bar avg');
+    const rawVal=isA?effectiveAwareness(id):r[k];
+    const v=rawVal||'—';const pct=rawVal?(rawVal/99*100):0;
+    const bc=isA?'attr-bar awareness-bar':(rawVal>=90?'attr-bar high':rawVal>=80?'attr-bar good':'attr-bar avg');
     const fw=isA?' style="grid-column:1/-1;border-right:none;"':'';
     return`<div class="attr-row"${fw}><div class="attr-label${isA?' awareness':''}">${a}</div><div class="attr-input-row"><div style="width:64px;text-align:center;font-family:var(--font-display);font-size:22px;font-weight:700;color:var(--brown);">${v}</div><div class="attr-bar-wrap"><div class="${bc}" style="width:${pct}%"></div></div></div></div>`;
   }).join('');
