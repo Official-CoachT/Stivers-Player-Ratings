@@ -85,6 +85,8 @@
   .edit-row span { color: var(--orange-light); font-size: 12px; }
   .pos-select { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); border-radius: 5px; color: white; font-size: 12px; font-family: var(--font-body); padding: 3px 6px; }
   .pos-select:focus { outline: none; border-color: var(--orange-light); }
+  .year-select { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); border-radius: 5px; color: white; font-size: 12px; font-family: var(--font-body); padding: 3px 6px; }
+  .year-select:focus { outline: none; border-color: var(--orange-light); }
   .num-input { width: 40px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); border-radius: 5px; color: white; font-size: 12px; font-family: var(--font-body); padding: 3px 4px; text-align: center; }
   .num-input:focus { outline: none; border-color: var(--orange-light); }
   .card-ovr-box { text-align: center; background: rgba(224,122,41,0.15); border-radius: 10px; padding: 8px 14px; min-width: 72px; border: 1px solid var(--orange); }
@@ -177,6 +179,7 @@
     <div class="add-player-row">
       <input type="text" id="new-player-name" placeholder="New player name" class="add-name-input">
       <select id="new-player-pos" class="add-pos-select"></select>
+      <select id="new-player-year" class="add-pos-select"></select>
       <input type="number" id="new-player-num" placeholder="#" class="add-num-input" min="0" max="99">
       <button type="button" class="add-btn" onclick="addPlayer()">+ Add</button>
     </div>
@@ -188,6 +191,7 @@
           <input class="name-input" id="name-input" oninput="onNameEdit()">
           <div class="edit-row">
             <select class="pos-select" id="pos-select" onchange="onPosEdit()"></select>
+            <select class="year-select" id="year-select" onchange="onYearEdit()"></select>
             <span>#</span>
             <input type="number" class="num-input" id="num-input" min="0" max="99" oninput="onNumEdit()">
           </div>
@@ -256,12 +260,19 @@ const POSITION_WEIGHTS={
   ST:  {pace:0.20,shooting:0.30,passing:0.10,dribbling:0.15,defending:0.05,physical:0.10,awareness:0.10}
 };
 
+// Small bump to Physical & Awareness by class year — reflects more time
+// developing physically, and (for Awareness specifically) more seasons
+// inside this program's game model. Adjust these numbers anytime.
+const YEAR_BONUS={FR:0,SO:2,JR:4,SR:6};
+const YEARS=["FR","SO","JR","SR"];
+
 let db={};let sel=null;let unlocked=false;let quizScores={};let roster=[];
 
 function seedPlayer(id){ return INITIAL_SEED.find(p=>p.id===id); }
 function displayName(id){ return (db[id]&&db[id].display_name)||(seedPlayer(id)&&seedPlayer(id).name)||'Unnamed'; }
 function playerPos(id){ return (db[id]&&db[id].position)||(seedPlayer(id)&&seedPlayer(id).pos)||'CM'; }
 function playerNum(id){ const n=db[id]&&db[id].jersey_num; return (n!==undefined&&n!==null)?n:((seedPlayer(id)&&seedPlayer(id).num)??'-'); }
+function playerYear(id){ return (db[id]&&db[id].year)||'FR'; }
 function initials(name){ return name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); }
 
 async function seedMissingPlayers(){
@@ -324,7 +335,7 @@ async function dbFetch(){
     const r=await fetch(`${SB_URL}/rest/v1/${TABLE}?select=*`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
     const rows=await r.json();
     db={};
-    if(Array.isArray(rows)) rows.forEach(r=>{db[r.id]={display_name:r.display_name,position:r.position,jersey_num:r.jersey_num,pace:r.pace,shooting:r.shooting,passing:r.passing,dribbling:r.dribbling,defending:r.defending,physical:r.physical,awareness:r.awareness};});
+    if(Array.isArray(rows)) rows.forEach(r=>{db[r.id]={display_name:r.display_name,position:r.position,jersey_num:r.jersey_num,year:r.year,pace:r.pace,shooting:r.shooting,passing:r.passing,dribbling:r.dribbling,defending:r.defending,physical:r.physical,awareness:r.awareness};});
   }catch(e){console.error(e);}
 }
 
@@ -336,10 +347,13 @@ function calcOVR(id){
   const r=db[id];
   if(!r) return null;
   const w=POSITION_WEIGHTS[playerPos(id)];
+  const bonus=YEAR_BONUS[playerYear(id)]||0;
   const awareness=effectiveAwareness(id);
   const vals=[r.pace,r.shooting,r.passing,r.dribbling,r.defending,r.physical,awareness];
   if(vals.some(v=>!v)) return null;
-  return Math.round(r.pace*w.pace+r.shooting*w.shooting+r.passing*w.passing+r.dribbling*w.dribbling+r.defending*w.defending+r.physical*w.physical+awareness*w.awareness);
+  const physicalBoosted=Math.min(99,r.physical+bonus);
+  const awarenessBoosted=Math.min(99,awareness+bonus);
+  return Math.round(r.pace*w.pace+r.shooting*w.shooting+r.passing*w.passing+r.dribbling*w.dribbling+r.defending*w.defending+physicalBoosted*w.physical+awarenessBoosted*w.awareness);
 }
 
 function ovrClass(v){if(v===null)return'dev';if(v>=90)return'high';if(v>=80)return'good';if(v>=70)return'avg';return'dev';}
@@ -359,7 +373,7 @@ function buildLeaderboard(){
     div.innerHTML=`
       <div class="lb-avatar">${initials(name)}<span class="num">${playerNum(p.id)}</span></div>
       <div class="lb-name">${name}</div>
-      <div class="lb-pos">${playerPos(p.id)}</div>
+      <div class="lb-pos">${playerPos(p.id)} · ${playerYear(p.id)}</div>
       <div class="lb-ovr ${ovrClass(p.ovr)}">${p.ovr!==null?p.ovr:'—'}</div>
       <span class="lb-ovr-label">OVR</span>`;
     grid.appendChild(div);
@@ -377,6 +391,10 @@ function buildPlayerSelect(){
   if(addPos.options.length===0){
     addPos.innerHTML=Object.keys(POSITION_WEIGHTS).map(pos=>`<option value="${pos}">${pos}</option>`).join('');
   }
+  const addYear=document.getElementById('new-player-year');
+  if(addYear.options.length===0){
+    addYear.innerHTML=YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+  }
   const wrap=document.getElementById('player-select');
   wrap.innerHTML='';
   roster.forEach(id=>{
@@ -392,6 +410,7 @@ function buildPlayerSelect(){
 async function addPlayer(){
   const nameInput=document.getElementById('new-player-name');
   const posInput=document.getElementById('new-player-pos');
+  const yearInput=document.getElementById('new-player-year');
   const numInput=document.getElementById('new-player-num');
   const name=nameInput.value.trim();
   if(!name) return;
@@ -399,10 +418,11 @@ async function addPlayer(){
   let n=1;
   while(db[id]){ id=id+'-'+n; n++; }
   const pos=posInput.value||'CM';
+  const year=yearInput.value||'FR';
   const num=parseInt(numInput.value)||0;
-  db[id]={display_name:name,position:pos,jersey_num:num};
+  db[id]={display_name:name,position:pos,year,jersey_num:num};
   roster.push(id);
-  await dbUpsert(id,{display_name:name,position:pos,jersey_num:num});
+  await dbUpsert(id,{display_name:name,position:pos,year,jersey_num:num});
   nameInput.value='';numInput.value='';
   buildPlayerSelect();
   buildLeaderboard();
@@ -429,6 +449,9 @@ function selectPlayer(id){
   const posSelect=document.getElementById('pos-select');
   posSelect.innerHTML=Object.keys(POSITION_WEIGHTS).map(pos=>`<option value="${pos}">${pos}</option>`).join('');
   posSelect.value=playerPos(id);
+  const yearSelect=document.getElementById('year-select');
+  yearSelect.innerHTML=YEARS.map(y=>`<option value="${y}">${y}</option>`).join('');
+  yearSelect.value=playerYear(id);
   document.getElementById('num-input').value=playerNum(id);
   const grid=document.getElementById('attr-grid');
   grid.innerHTML='';
@@ -476,6 +499,13 @@ function onPosEdit(){
   updateOVR();
 }
 
+function onYearEdit(){
+  if(!sel)return;
+  if(!db[sel])db[sel]={};
+  db[sel].year=document.getElementById('year-select').value;
+  updateOVR();
+}
+
 function onNumEdit(){
   if(!sel)return;
   if(!db[sel])db[sel]={};
@@ -509,7 +539,7 @@ async function saveRatings(){
   const btn=document.getElementById('save-btn');
   btn.disabled=true;btn.textContent='SAVING...';
   const r=db[sel]||{};
-  await dbUpsert(sel,{display_name:document.getElementById('name-input').value||displayName(sel),position:document.getElementById('pos-select').value,jersey_num:parseInt(document.getElementById('num-input').value)||0,pace:r.pace||50,shooting:r.shooting||50,passing:r.passing||50,dribbling:r.dribbling||50,defending:r.defending||50,physical:r.physical||50,awareness:r.awareness||50});
+  await dbUpsert(sel,{display_name:document.getElementById('name-input').value||displayName(sel),position:document.getElementById('pos-select').value,year:document.getElementById('year-select').value,jersey_num:parseInt(document.getElementById('num-input').value)||0,pace:r.pace||50,shooting:r.shooting||50,passing:r.passing||50,dribbling:r.dribbling||50,defending:r.defending||50,physical:r.physical||50,awareness:r.awareness||50});
   btn.disabled=false;btn.textContent='SAVE RATINGS';
   buildPlayerSelect();
   const t=document.getElementById('toast');t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);
@@ -529,7 +559,7 @@ function openModal(id){
   document.getElementById('modal-body').innerHTML=`
     <div class="card-header" style="border-radius:0;">
       <div class="card-avatar">${initials(name)}</div>
-      <div class="card-name-wrap"><div class="modal-name">${name}</div><div class="card-pos">${playerPos(id)} · #${playerNum(id)}</div></div>
+      <div class="card-name-wrap"><div class="modal-name">${name}</div><div class="card-pos">${playerPos(id)} · ${playerYear(id)} · #${playerNum(id)}</div></div>
       <div class="card-ovr-box"><div class="card-ovr-num">${ovr!==null?ovr:'—'}</div><div class="card-ovr-label">OVR</div></div>
     </div>
     <div class="attr-grid">${rows}</div>
