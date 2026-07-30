@@ -114,6 +114,10 @@
   .attr-bar.avg { background: #C68A4A; }
   .attr-bar.awareness-bar { background: var(--orange); }
   .quiz-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+  .entry-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .entry-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--gray-xlight); border: 1px solid var(--border); border-radius: 99px; padding: 3px 4px 3px 9px; font-size: 11px; color: var(--gray-dark); }
+  .entry-del { width: 16px; height: 16px; border-radius: 50%; border: none; background: var(--border); color: white; font-size: 11px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+  .entry-del:active { background: #B23A2E; }
   .quiz-meta { font-size: 11px; color: var(--gray); flex: 1; }
   .quiz-input { width: 56px; padding: 6px; font-size: 13px; text-align: center; border: 2px solid var(--border); border-radius: 6px; }
   .quiz-input:focus { outline: none; border-color: var(--orange); }
@@ -303,12 +307,12 @@ async function seedMissingPlayers(){
 
 async function dbFetchQuiz(){
   try{
-    const r=await fetch(`${SB_URL}/rest/v1/quiz_scores?select=player_id,score`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+    const r=await fetch(`${SB_URL}/rest/v1/quiz_scores?select=id,player_id,score`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
     const rows=await r.json();
     quizScores={};
     if(Array.isArray(rows)) rows.forEach(row=>{
       if(!quizScores[row.player_id]) quizScores[row.player_id]=[];
-      quizScores[row.player_id].push(Number(row.score));
+      quizScores[row.player_id].push({id:row.id,value:Number(row.score)});
     });
   }catch(e){console.error(e);}
 }
@@ -316,7 +320,15 @@ async function dbFetchQuiz(){
 function quizAvg(id){
   const list=quizScores[id];
   if(!list||list.length===0) return null;
-  return Math.round(list.reduce((a,b)=>a+b,0)/list.length);
+  return Math.round(list.reduce((a,b)=>a+b.value,0)/list.length);
+}
+
+// Renders a small chip list of logged entries with a × to delete each one.
+function renderEntries(containerId,list,formatFn,deleteFnName,playerId){
+  const el=document.getElementById(containerId);
+  if(!el) return;
+  if(!list||list.length===0){ el.innerHTML=''; return; }
+  el.innerHTML=list.map(e=>`<span class="entry-chip">${formatFn(e.value)}<button type="button" class="entry-del" onclick="${deleteFnName}('${e.id}','${playerId}')">×</button></span>`).join('');
 }
 
 // Averages whichever inputs actually exist yet (ignores missing ones).
@@ -335,14 +347,14 @@ function effectiveAwareness(id){
 // time (fastest = 99, slowest = a 50 floor), using each player's personal best.
 function teamSprintRange(){
   let all=[];
-  Object.values(sprintTimes).forEach(arr=>{all=all.concat(arr);});
+  Object.values(sprintTimes).forEach(arr=>{all=all.concat(arr.map(e=>e.value));});
   if(all.length===0) return null;
   return {min:Math.min(...all),max:Math.max(...all)};
 }
 function sprintScore(id){
   const list=sprintTimes[id];
   if(!list||list.length===0) return null;
-  const best=Math.min(...list);
+  const best=Math.min(...list.map(e=>e.value));
   const range=teamSprintRange();
   if(!range||range.max===range.min) return 99;
   const score=99-((best-range.min)/(range.max-range.min))*49;
@@ -354,7 +366,7 @@ function sprintScore(id){
 function manuScore(id){
   const list=manuScores[id];
   if(!list||list.length===0) return null;
-  const best=Math.max(...list);
+  const best=Math.max(...list.map(e=>e.value));
   return Math.min(99,Math.round((best/20)*99));
 }
 
@@ -368,20 +380,20 @@ function effectivePace(id){
 // timed. A conditioning/strength-endurance circuit, so it feeds Physical, not
 // Pace. Scored the same way as sprint times — relative to the team's own
 // fastest/slowest logged time, using each player's personal-best (fastest) run.
-function teamTigerEyeRange(){
-  let all=[];
-  Object.values(tigerEyeTimes).forEach(arr=>{all=all.concat(arr);});
-  if(all.length===0) return null;
-  return {min:Math.min(...all),max:Math.max(...all)};
-}
+// Tiger Eye scored against a fixed benchmark rather than team-relative:
+// the varsity standard (9:30) lands right at the Average/Good line, and
+// score moves ~1 point per 6 seconds faster or slower than that, with no
+// fixed "elite" ceiling other than the 99 cap itself.
+const TIGER_EYE_STANDARD_SECONDS=570; // 9:30
+const TIGER_EYE_STANDARD_SCORE=67;
+const TIGER_EYE_SECONDS_PER_POINT=6;
 function tigerEyeScore(id){
   const list=tigerEyeTimes[id];
   if(!list||list.length===0) return null;
-  const best=Math.min(...list);
-  const range=teamTigerEyeRange();
-  if(!range||range.max===range.min) return 99;
-  const score=99-((best-range.min)/(range.max-range.min))*49;
-  return Math.round(Math.max(50,Math.min(99,score)));
+  const best=Math.min(...list.map(e=>e.value));
+  const diff=TIGER_EYE_STANDARD_SECONDS-best; // positive = faster than standard
+  const score=TIGER_EYE_STANDARD_SCORE+(diff/TIGER_EYE_SECONDS_PER_POINT);
+  return Math.round(Math.max(30,Math.min(99,score)));
 }
 
 // Blends your manual physical judgment with logged Tiger Eye results.
@@ -393,13 +405,31 @@ async function logQuizScore(id){
   const input=document.getElementById('quiz-input');
   const score=Math.min(99,Math.max(1,parseInt(input.value)||0));
   if(!score) return;
-  await fetch(`${SB_URL}/rest/v1/quiz_scores`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({player_id:id,score})});
+  const res=await fetch(`${SB_URL}/rest/v1/quiz_scores`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json",Prefer:"return=representation"},body:JSON.stringify({player_id:id,score})});
+  const rows=await res.json();
+  const newId=rows&&rows[0]&&rows[0].id;
   if(!quizScores[id]) quizScores[id]=[];
-  quizScores[id].push(score);
+  quizScores[id].push({id:newId,value:score});
   input.value='';
-  document.getElementById('quiz-meta').textContent=`Quiz avg: ${quizAvg(id)} (${quizScores[id].length} logged)`;
-  updateBlendDisplay(id);
+  refreshQuizExtra(id);
   updateOVR();
+}
+
+async function deleteQuizEntry(entryId,playerId){
+  if(!confirm('Delete this quiz score?')) return;
+  await fetch(`${SB_URL}/rest/v1/quiz_scores?id=eq.${entryId}`,{method:"DELETE",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+  quizScores[playerId]=(quizScores[playerId]||[]).filter(e=>e.id!==entryId);
+  refreshQuizExtra(playerId);
+  updateOVR();
+  buildLeaderboard();
+}
+
+function refreshQuizExtra(id){
+  const avg=quizAvg(id);
+  const metaEl=document.getElementById('quiz-meta');
+  if(metaEl) metaEl.textContent=avg!==null?`Quiz avg: ${avg} (${quizScores[id].length} logged)`:'No quizzes logged yet';
+  renderEntries('quiz-entries',quizScores[id],v=>v,'deleteQuizEntry',id);
+  updateBlendDisplay(id);
 }
 
 function updateBlendDisplay(id){
@@ -409,24 +439,24 @@ function updateBlendDisplay(id){
 
 async function dbFetchSprints(){
   try{
-    const r=await fetch(`${SB_URL}/rest/v1/sprint_times?select=player_id,time_seconds`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+    const r=await fetch(`${SB_URL}/rest/v1/sprint_times?select=id,player_id,time_seconds`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
     const rows=await r.json();
     sprintTimes={};
     if(Array.isArray(rows)) rows.forEach(row=>{
       if(!sprintTimes[row.player_id]) sprintTimes[row.player_id]=[];
-      sprintTimes[row.player_id].push(Number(row.time_seconds));
+      sprintTimes[row.player_id].push({id:row.id,value:Number(row.time_seconds)});
     });
   }catch(e){console.error(e);}
 }
 
 async function dbFetchManU(){
   try{
-    const r=await fetch(`${SB_URL}/rest/v1/manu_scores?select=player_id,reps`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+    const r=await fetch(`${SB_URL}/rest/v1/manu_scores?select=id,player_id,reps`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
     const rows=await r.json();
     manuScores={};
     if(Array.isArray(rows)) rows.forEach(row=>{
       if(!manuScores[row.player_id]) manuScores[row.player_id]=[];
-      manuScores[row.player_id].push(Number(row.reps));
+      manuScores[row.player_id].push({id:row.id,value:Number(row.reps)});
     });
   }catch(e){console.error(e);}
 }
@@ -435,48 +465,68 @@ async function logSprintTime(id){
   const input=document.getElementById('sprint-input');
   const t=parseFloat(input.value);
   if(!t||t<=0) return;
-  await fetch(`${SB_URL}/rest/v1/sprint_times`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({player_id:id,time_seconds:t})});
+  const res=await fetch(`${SB_URL}/rest/v1/sprint_times`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json",Prefer:"return=representation"},body:JSON.stringify({player_id:id,time_seconds:t})});
+  const rows=await res.json();
+  const newId=rows&&rows[0]&&rows[0].id;
   if(!sprintTimes[id]) sprintTimes[id]=[];
-  sprintTimes[id].push(t);
+  sprintTimes[id].push({id:newId,value:t});
   input.value='';
   refreshPaceExtra(id);
   updateOVR();
+}
+
+async function deleteSprintEntry(entryId,playerId){
+  if(!confirm('Delete this sprint time?')) return;
+  await fetch(`${SB_URL}/rest/v1/sprint_times?id=eq.${entryId}`,{method:"DELETE",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+  sprintTimes[playerId]=(sprintTimes[playerId]||[]).filter(e=>e.id!==entryId);
+  refreshPaceExtra(playerId);
+  updateOVR();
+  buildLeaderboard();
 }
 
 async function logManU(id){
   const input=document.getElementById('manu-input');
   const reps=Math.min(20,Math.max(0,parseInt(input.value)||0));
-  await fetch(`${SB_URL}/rest/v1/manu_scores`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({player_id:id,reps})});
+  const res=await fetch(`${SB_URL}/rest/v1/manu_scores`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json",Prefer:"return=representation"},body:JSON.stringify({player_id:id,reps})});
+  const rows=await res.json();
+  const newId=rows&&rows[0]&&rows[0].id;
   if(!manuScores[id]) manuScores[id]=[];
-  manuScores[id].push(reps);
+  manuScores[id].push({id:newId,value:reps});
   input.value='';
   refreshPaceExtra(id);
   updateOVR();
 }
 
+async function deleteManuEntry(entryId,playerId){
+  if(!confirm('Delete this Man U Test entry?')) return;
+  await fetch(`${SB_URL}/rest/v1/manu_scores?id=eq.${entryId}`,{method:"DELETE",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+  manuScores[playerId]=(manuScores[playerId]||[]).filter(e=>e.id!==entryId);
+  refreshPaceExtra(playerId);
+  updateOVR();
+  buildLeaderboard();
+}
+
 function refreshPaceExtra(id){
+  const sList=sprintTimes[id];
   const sMeta=document.getElementById('sprint-meta');
-  if(sMeta){
-    const list=sprintTimes[id];
-    sMeta.textContent=list&&list.length?`Best: ${Math.min(...list)}s (${list.length} logged)`:'No times logged yet';
-  }
+  if(sMeta) sMeta.textContent=sList&&sList.length?`Best: ${Math.min(...sList.map(e=>e.value))}s (${sList.length} logged)`:'No times logged yet';
+  renderEntries('sprint-entries',sList,v=>`${v}s`,'deleteSprintEntry',id);
+  const mList=manuScores[id];
   const mMeta=document.getElementById('manu-meta');
-  if(mMeta){
-    const list=manuScores[id];
-    mMeta.textContent=list&&list.length?`Best: ${Math.max(...list)}/20 (${list.length} logged)`:'No attempts logged yet';
-  }
+  if(mMeta) mMeta.textContent=mList&&mList.length?`Best: ${Math.max(...mList.map(e=>e.value))}/20 (${mList.length} logged)`:'No attempts logged yet';
+  renderEntries('manu-entries',mList,v=>`${v}/20`,'deleteManuEntry',id);
   const blendEl=document.getElementById('pace-blend-val');
   if(blendEl) blendEl.textContent=effectivePace(id)??'—';
 }
 
 async function dbFetchTigerEye(){
   try{
-    const r=await fetch(`${SB_URL}/rest/v1/tiger_eye_times?select=player_id,time_seconds`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+    const r=await fetch(`${SB_URL}/rest/v1/tiger_eye_times?select=id,player_id,time_seconds`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
     const rows=await r.json();
     tigerEyeTimes={};
     if(Array.isArray(rows)) rows.forEach(row=>{
       if(!tigerEyeTimes[row.player_id]) tigerEyeTimes[row.player_id]=[];
-      tigerEyeTimes[row.player_id].push(Number(row.time_seconds));
+      tigerEyeTimes[row.player_id].push({id:row.id,value:Number(row.time_seconds)});
     });
   }catch(e){console.error(e);}
 }
@@ -485,20 +535,30 @@ async function logTigerEye(id){
   const input=document.getElementById('tigereye-input');
   const t=parseMMSS(input.value);
   if(!t||t<=0) return;
-  await fetch(`${SB_URL}/rest/v1/tiger_eye_times`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({player_id:id,time_seconds:t})});
+  const res=await fetch(`${SB_URL}/rest/v1/tiger_eye_times`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json",Prefer:"return=representation"},body:JSON.stringify({player_id:id,time_seconds:t})});
+  const rows=await res.json();
+  const newId=rows&&rows[0]&&rows[0].id;
   if(!tigerEyeTimes[id]) tigerEyeTimes[id]=[];
-  tigerEyeTimes[id].push(t);
+  tigerEyeTimes[id].push({id:newId,value:t});
   input.value='';
   refreshPhysicalExtra(id);
   updateOVR();
 }
 
+async function deleteTigerEyeEntry(entryId,playerId){
+  if(!confirm('Delete this Tiger Eye time?')) return;
+  await fetch(`${SB_URL}/rest/v1/tiger_eye_times?id=eq.${entryId}`,{method:"DELETE",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
+  tigerEyeTimes[playerId]=(tigerEyeTimes[playerId]||[]).filter(e=>e.id!==entryId);
+  refreshPhysicalExtra(playerId);
+  updateOVR();
+  buildLeaderboard();
+}
+
 function refreshPhysicalExtra(id){
+  const list=tigerEyeTimes[id];
   const meta=document.getElementById('tigereye-meta');
-  if(meta){
-    const list=tigerEyeTimes[id];
-    meta.textContent=list&&list.length?`Best: ${formatMMSS(Math.min(...list))} (${list.length} logged)`:'No times logged yet';
-  }
+  if(meta) meta.textContent=list&&list.length?`Best: ${formatMMSS(Math.min(...list.map(e=>e.value)))} (${list.length} logged)`:'No times logged yet';
+  renderEntries('tigereye-entries',list,v=>formatMMSS(v),'deleteTigerEyeEntry',id);
   const blendEl=document.getElementById('physical-blend-val');
   if(blendEl) blendEl.textContent=effectivePhysical(id)??'—';
 }
@@ -657,26 +717,34 @@ function selectPlayer(id){
         <input type="number" min="1" max="99" class="quiz-input" id="quiz-input" placeholder="score">
         <button type="button" class="quiz-log-btn" onclick="logQuizScore('${id}')">Log</button>
       </div>
+      <div class="entry-list" id="quiz-entries"></div>
       <div class="blend-row">Blended for OVR: <strong id="blend-val">${effectiveAwareness(id)??'—'}</strong></div>`:''}
       ${isPace?`<div class="quiz-row">
-        <span class="quiz-meta" id="sprint-meta">${(()=>{const list=sprintTimes[id];return list&&list.length?`Best: ${Math.min(...list)}s (${list.length} logged)`:'No times logged yet';})()}</span>
+        <span class="quiz-meta" id="sprint-meta">${(()=>{const list=sprintTimes[id];return list&&list.length?`Best: ${Math.min(...list.map(e=>e.value))}s (${list.length} logged)`:'No times logged yet';})()}</span>
         <input type="number" step="0.01" min="0" class="quiz-input" id="sprint-input" placeholder="secs">
         <button type="button" class="quiz-log-btn" onclick="logSprintTime('${id}')">Log</button>
       </div>
+      <div class="entry-list" id="sprint-entries"></div>
       <div class="quiz-row">
-        <span class="quiz-meta" id="manu-meta">${(()=>{const list=manuScores[id];return list&&list.length?`Best: ${Math.max(...list)}/20 (${list.length} logged)`:'No attempts logged yet';})()}</span>
+        <span class="quiz-meta" id="manu-meta">${(()=>{const list=manuScores[id];return list&&list.length?`Best: ${Math.max(...list.map(e=>e.value))}/20 (${list.length} logged)`:'No attempts logged yet';})()}</span>
         <input type="number" min="0" max="20" class="quiz-input" id="manu-input" placeholder="/20">
         <button type="button" class="quiz-log-btn" onclick="logManU('${id}')">Log</button>
       </div>
+      <div class="entry-list" id="manu-entries"></div>
       <div class="blend-row">Blended for OVR: <strong id="pace-blend-val">${effectivePace(id)??'—'}</strong></div>`:''}
       ${isPhysical?`<div class="quiz-row">
-        <span class="quiz-meta" id="tigereye-meta">${(()=>{const list=tigerEyeTimes[id];return list&&list.length?`Best: ${formatMMSS(Math.min(...list))} (${list.length} logged)`:'No times logged yet';})()}</span>
+        <span class="quiz-meta" id="tigereye-meta">${(()=>{const list=tigerEyeTimes[id];return list&&list.length?`Best: ${formatMMSS(Math.min(...list.map(e=>e.value)))} (${list.length} logged)`:'No times logged yet';})()}</span>
         <input type="text" inputmode="numeric" class="quiz-input" id="tigereye-input" placeholder="m:ss">
         <button type="button" class="quiz-log-btn" onclick="logTigerEye('${id}')">Log</button>
       </div>
+      <div class="entry-list" id="tigereye-entries"></div>
       <div class="blend-row">Blended for OVR: <strong id="physical-blend-val">${effectivePhysical(id)??'—'}</strong></div>`:''}`;
     grid.appendChild(div);
   });
+  renderEntries('quiz-entries',quizScores[id],v=>v,'deleteQuizEntry',id);
+  renderEntries('sprint-entries',sprintTimes[id],v=>`${v}s`,'deleteSprintEntry',id);
+  renderEntries('manu-entries',manuScores[id],v=>`${v}/20`,'deleteManuEntry',id);
+  renderEntries('tigereye-entries',tigerEyeTimes[id],v=>formatMMSS(v),'deleteTigerEyeEntry',id);
   updateOVR();
 }
 
