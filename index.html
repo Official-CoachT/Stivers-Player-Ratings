@@ -275,6 +275,24 @@ function playerNum(id){ const n=db[id]&&db[id].jersey_num; return (n!==undefined
 function playerYear(id){ return (db[id]&&db[id].year)||'FR'; }
 function initials(name){ return name.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); }
 
+// Tiger Eye is logged as m:ss (e.g. "4:32") since it's a multi-round circuit
+// that runs several minutes — parsed to total seconds for storage/scoring,
+// displayed back as m:ss so it stays readable.
+function parseMMSS(str){
+  str=(str||'').trim();
+  if(str.includes(':')){
+    const [m,s]=str.split(':');
+    return (parseInt(m)||0)*60+(parseFloat(s)||0);
+  }
+  return parseFloat(str)||0;
+}
+function formatMMSS(totalSeconds){
+  const m=Math.floor(totalSeconds/60);
+  const s=Math.round((totalSeconds-m*60)*10)/10;
+  const sPadded=s<10?'0'+s:''+s;
+  return `${m}:${sPadded}`;
+}
+
 async function seedMissingPlayers(){
   const missing=INITIAL_SEED.filter(p=>!db[p.id]);
   for(const p of missing){
@@ -465,7 +483,7 @@ async function dbFetchTigerEye(){
 
 async function logTigerEye(id){
   const input=document.getElementById('tigereye-input');
-  const t=parseFloat(input.value);
+  const t=parseMMSS(input.value);
   if(!t||t<=0) return;
   await fetch(`${SB_URL}/rest/v1/tiger_eye_times`,{method:"POST",headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({player_id:id,time_seconds:t})});
   if(!tigerEyeTimes[id]) tigerEyeTimes[id]=[];
@@ -479,7 +497,7 @@ function refreshPhysicalExtra(id){
   const meta=document.getElementById('tigereye-meta');
   if(meta){
     const list=tigerEyeTimes[id];
-    meta.textContent=list&&list.length?`Best: ${Math.min(...list)}s (${list.length} logged)`:'No times logged yet';
+    meta.textContent=list&&list.length?`Best: ${formatMMSS(Math.min(...list))} (${list.length} logged)`:'No times logged yet';
   }
   const blendEl=document.getElementById('physical-blend-val');
   if(blendEl) blendEl.textContent=effectivePhysical(id)??'—';
@@ -652,8 +670,8 @@ function selectPlayer(id){
       </div>
       <div class="blend-row">Blended for OVR: <strong id="pace-blend-val">${effectivePace(id)??'—'}</strong></div>`:''}
       ${isPhysical?`<div class="quiz-row">
-        <span class="quiz-meta" id="tigereye-meta">${(()=>{const list=tigerEyeTimes[id];return list&&list.length?`Best: ${Math.min(...list)}s (${list.length} logged)`:'No times logged yet';})()}</span>
-        <input type="number" step="0.1" min="0" class="quiz-input" id="tigereye-input" placeholder="secs">
+        <span class="quiz-meta" id="tigereye-meta">${(()=>{const list=tigerEyeTimes[id];return list&&list.length?`Best: ${formatMMSS(Math.min(...list))} (${list.length} logged)`:'No times logged yet';})()}</span>
+        <input type="text" inputmode="numeric" class="quiz-input" id="tigereye-input" placeholder="m:ss">
         <button type="button" class="quiz-log-btn" onclick="logTigerEye('${id}')">Log</button>
       </div>
       <div class="blend-row">Blended for OVR: <strong id="physical-blend-val">${effectivePhysical(id)??'—'}</strong></div>`:''}`;
