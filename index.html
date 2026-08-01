@@ -118,6 +118,19 @@
   .attr-label.awareness { color: var(--brown); }
   .attr-sublabel { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--gray); font-size: 10px; }
   .blend-row { font-size: 12px; color: var(--brown); font-weight: 600; margin-top: 8px; }
+  .cat-accordion { display: flex; flex-direction: column; }
+  .cat-section { border-bottom: 1px solid var(--border); }
+  .cat-header { display: flex; align-items: center; padding: 14px 18px; cursor: pointer; }
+  .cat-name { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-dark); }
+  .cat-value { font-family: var(--font-display); font-size: 18px; font-weight: 700; color: var(--brown); margin-left: auto; margin-right: 12px; }
+  .cat-chevron { font-size: 11px; color: var(--gray); transition: transform 0.2s; display: inline-block; }
+  .cat-subs { padding: 2px 18px 16px; }
+  .sub-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
+  .sub-label { width: 108px; flex-shrink: 0; font-size: 12px; color: var(--gray-dark); }
+  .sub-slider { flex: 1; -webkit-appearance: none; appearance: none; height: 4px; background: var(--gray-bg); border-radius: 99px; outline: none; }
+  .sub-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--brown); cursor: pointer; border: 2px solid var(--orange-light); }
+  .sub-slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--brown); cursor: pointer; border: 2px solid var(--orange-light); }
+  .sub-val { width: 26px; text-align: right; font-family: var(--font-display); font-size: 13px; font-weight: 700; color: var(--brown); flex-shrink: 0; }
   .blend-row strong { font-family: var(--font-display); font-size: 15px; }
   .attr-input-row { display: flex; align-items: center; gap: 8px; }
   .stepper { display: flex; align-items: center; gap: 4px; }
@@ -261,6 +274,30 @@ const INITIAL_SEED=[
 ];
 
 const ATTRS=["Pace","Shooting","Passing","Dribbling","Defending","Physical","Awareness"];
+// Goalkeepers get a completely different stat set — none of the outfield
+// categories map cleanly to keeper skills. Pure manual steppers, no
+// quiz/sprint/Tiger Eye blending (unlike Pace/Physical/Awareness above).
+const GK_ATTRS=["Diving","Handling","Kicking","Reflexes","Speed","Positioning"];
+
+// Each outfield category (except Awareness) is a computed average of these
+// sub-attributes, rated individually via sliders. Awareness has no sub-attrs —
+// it stays a single directly-rated stat blended with quiz scores as before.
+const CATEGORY_SUBATTRS={
+  Pace:["Acceleration","Sprint Speed"],
+  Shooting:["Attacking Position","Finishing","Shot Power","Long Shots","Volleys","Penalties"],
+  Passing:["Vision","Crossing","FK Accuracy","Short Pass","Long Pass","Curve"],
+  Dribbling:["Agility","Balance","Reactions","Ball Control","Dribbling","Composure"],
+  Defending:["Interceptions","Heading Accuracy","Def. Awareness","Standing Tackle","Slide Tackle"],
+  Physical:["Jumping","Stamina","Strength","Aggression"]
+};
+const SUBATTR_KEY={
+  "Acceleration":"acceleration","Sprint Speed":"sprint_speed",
+  "Attacking Position":"attacking_position","Finishing":"finishing","Shot Power":"shot_power","Long Shots":"long_shots","Volleys":"volleys","Penalties":"penalties",
+  "Vision":"vision","Crossing":"crossing","FK Accuracy":"fk_accuracy","Short Pass":"short_pass","Long Pass":"long_pass","Curve":"curve",
+  "Agility":"agility","Balance":"balance","Reactions":"reactions","Ball Control":"ball_control","Dribbling":"dribbling_skill","Composure":"composure",
+  "Interceptions":"interceptions","Heading Accuracy":"heading_accuracy","Def. Awareness":"def_awareness","Standing Tackle":"standing_tackle","Slide Tackle":"slide_tackle",
+  "Jumping":"jumping","Stamina":"stamina","Strength":"strength","Aggression":"aggression"
+};
 
 // Position-specific weighting toward OVR — must sum to 1.0 per position
 const POSITION_WEIGHTS={
@@ -381,20 +418,11 @@ function manuScore(id){
   return Math.min(99,Math.round((best/20)*99));
 }
 
-// Blends your manual pace judgment with sprint-time and Man U Test data —
-// uses whichever of the three exist so far.
-function effectivePace(id){
-  return blendValues([db[id]&&db[id].pace, sprintScore(id), manuScore(id)]);
-}
-
 // Tiger Eye: 4 rounds of squats/burpees/pushups + a sideline-to-sideline sprint,
-// timed. A conditioning/strength-endurance circuit, so it feeds Physical, not
-// Pace. Scored the same way as sprint times — relative to the team's own
-// fastest/slowest logged time, using each player's personal-best (fastest) run.
-// Tiger Eye scored against a fixed benchmark rather than team-relative:
-// the varsity standard (9:30) lands right at the Average/Good line, and
-// score moves ~1 point per 6 seconds faster or slower than that, with no
-// fixed "elite" ceiling other than the 99 cap itself.
+// timed. A conditioning/strength-endurance circuit, so it feeds Physical's
+// Jumping/Stamina/Strength sub-attributes, not Pace. Scored against a fixed
+// benchmark: the varsity standard (9:30) lands at the Average/Good line, and
+// score moves ~1 point per 6 seconds faster or slower, capped 30-99.
 const TIGER_EYE_STANDARD_SECONDS=570; // 9:30
 const TIGER_EYE_STANDARD_SCORE=67;
 const TIGER_EYE_SECONDS_PER_POINT=6;
@@ -407,9 +435,23 @@ function tigerEyeScore(id){
   return Math.round(Math.max(30,Math.min(99,score)));
 }
 
-// Blends your manual physical judgment with logged Tiger Eye results.
-function effectivePhysical(id){
-  return blendValues([db[id]&&db[id].physical, tigerEyeScore(id)]);
+// Effective value for one sub-attribute: blends manual + objective data for
+// the few sub-attrs that have a data source, otherwise just the manual read.
+function subAttrValue(id,subName){
+  const key=SUBATTR_KEY[subName];
+  const manual=db[id]&&db[id][key];
+  if(subName==='Sprint Speed') return blendValues([manual, sprintScore(id), manuScore(id)]);
+  if(subName==='Jumping'||subName==='Stamina'||subName==='Strength') return blendValues([manual, tigerEyeScore(id)]);
+  return manual!=null?manual:null;
+}
+
+// A category's value is the average of whichever of its sub-attributes have
+// been rated so far (same forgiving "use what exists" pattern as elsewhere).
+function categoryValue(id,category){
+  if(category==='Awareness') return effectiveAwareness(id);
+  const subs=CATEGORY_SUBATTRS[category];
+  if(!subs) return null;
+  return blendValues(subs.map(s=>subAttrValue(id,s)));
 }
 
 async function logQuizScore(id){
@@ -527,7 +569,8 @@ function refreshPaceExtra(id){
   if(mMeta) mMeta.textContent=mList&&mList.length?`Best: ${Math.max(...mList.map(e=>e.value))}/20 (${mList.length} logged)`:'No attempts logged yet';
   renderEntries('manu-entries',mList,v=>`${v}/20`,'deleteManuEntry',id);
   const blendEl=document.getElementById('pace-blend-val');
-  if(blendEl) blendEl.textContent=effectivePace(id)??'—';
+  if(blendEl) blendEl.textContent=subAttrValue(id,'Sprint Speed')??'—';
+  refreshCategoryHeader(id,'Pace');
 }
 
 async function dbFetchTigerEye(){
@@ -571,7 +614,13 @@ function refreshPhysicalExtra(id){
   if(meta) meta.textContent=list&&list.length?`Best: ${formatMMSS(Math.min(...list.map(e=>e.value)))} (${list.length} logged)`:'No times logged yet';
   renderEntries('tigereye-entries',list,v=>formatMMSS(v),'deleteTigerEyeEntry',id);
   const blendEl=document.getElementById('physical-blend-val');
-  if(blendEl) blendEl.textContent=effectivePhysical(id)??'—';
+  if(blendEl) blendEl.textContent=tigerEyeScore(id)??'—';
+  refreshCategoryHeader(id,'Physical');
+}
+
+function refreshCategoryHeader(id,cat){
+  const el=document.getElementById('catval-'+cat);
+  if(el) el.textContent=categoryValue(id,cat)??'—';
 }
 
 async function dbFetch(){
@@ -579,7 +628,12 @@ async function dbFetch(){
     const r=await fetch(`${SB_URL}/rest/v1/${TABLE}?select=*`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
     const rows=await r.json();
     db={};
-    if(Array.isArray(rows)) rows.forEach(r=>{db[r.id]={display_name:r.display_name,position:r.position,jersey_num:r.jersey_num,year:r.year,pace:r.pace,shooting:r.shooting,passing:r.passing,dribbling:r.dribbling,defending:r.defending,physical:r.physical,awareness:r.awareness};});
+    const subKeys=Object.values(SUBATTR_KEY);
+    if(Array.isArray(rows)) rows.forEach(row=>{
+      const entry={display_name:row.display_name,position:row.position,jersey_num:row.jersey_num,year:row.year,awareness:row.awareness,diving:row.diving,handling:row.handling,kicking:row.kicking,reflexes:row.reflexes,speed:row.speed,positioning:row.positioning};
+      subKeys.forEach(k=>{entry[k]=row[k];});
+      db[row.id]=entry;
+    });
   }catch(e){console.error(e);}
 }
 
@@ -590,27 +644,36 @@ async function dbUpsert(id,data){
 function calcOVR(id){
   const r=db[id];
   if(!r) return null;
-  const w=POSITION_WEIGHTS[playerPos(id)];
   const bonus=YEAR_BONUS[playerYear(id)]||0;
-  const pace=effectivePace(id);
-  const physical=effectivePhysical(id);
-  const awareness=effectiveAwareness(id);
-  const vals=[pace,r.shooting,r.passing,r.dribbling,r.defending,physical,awareness];
-  if(vals.some(v=>!v)) return null;
+  if(playerPos(id)==='GK'){
+    const vals=[r.diving,r.handling,r.kicking,r.reflexes,r.speed,r.positioning];
+    if(vals.some(v=>!v)) return null;
+    const reflexesBoosted=Math.min(99,r.reflexes+bonus);
+    const positioningBoosted=Math.min(99,r.positioning+bonus);
+    return Math.round((r.diving+r.handling+r.kicking+reflexesBoosted+r.speed+positioningBoosted)/6);
+  }
+  const w=POSITION_WEIGHTS[playerPos(id)];
+  const pace=categoryValue(id,'Pace');
+  const shooting=categoryValue(id,'Shooting');
+  const passing=categoryValue(id,'Passing');
+  const dribbling=categoryValue(id,'Dribbling');
+  const defending=categoryValue(id,'Defending');
+  const physical=categoryValue(id,'Physical');
+  const awareness=categoryValue(id,'Awareness');
+  const vals=[pace,shooting,passing,dribbling,defending,physical,awareness];
+  if(vals.some(v=>v==null)) return null;
   const physicalBoosted=Math.min(99,physical+bonus);
   const awarenessBoosted=Math.min(99,awareness+bonus);
-  return Math.round(pace*w.pace+r.shooting*w.shooting+r.passing*w.passing+r.dribbling*w.dribbling+r.defending*w.defending+physicalBoosted*w.physical+awarenessBoosted*w.awareness);
+  return Math.round(pace*w.pace+shooting*w.shooting+passing*w.passing+dribbling*w.dribbling+defending*w.defending+physicalBoosted*w.physical+awarenessBoosted*w.awareness);
 }
 
 function ovrClass(v){if(v===null)return'dev';if(v>=90)return'high';if(v>=80)return'good';if(v>=70)return'avg';return'dev';}
 function tierClass(v){if(v===null)return'tier-developing';if(v>=90)return'tier-elite';if(v>=80)return'tier-excellent';if(v>=70)return'tier-good';if(v>=60)return'tier-average';return'tier-developing';}
 
-const ATTR_ABBR={Pace:'PAC',Shooting:'SHO',Passing:'PAS',Dribbling:'DRI',Defending:'DEF',Physical:'PHY',Awareness:'AWA'};
+const ATTR_ABBR={Pace:'PAC',Shooting:'SHO',Passing:'PAS',Dribbling:'DRI',Defending:'DEF',Physical:'PHY',Awareness:'AWA',Diving:'DIV',Handling:'HAN',Kicking:'KIC',Reflexes:'REF',Speed:'SPD',Positioning:'POS'};
 function statValue(id,attr){
+  if(CATEGORY_SUBATTRS[attr]||attr==='Awareness') return categoryValue(id,attr);
   const r=db[id]||{};
-  if(attr==='Pace') return effectivePace(id);
-  if(attr==='Physical') return effectivePhysical(id);
-  if(attr==='Awareness') return effectiveAwareness(id);
   return r[attr.toLowerCase()];
 }
 
@@ -623,7 +686,8 @@ function buildLeaderboard(){
   grid.innerHTML='';
   ranked.forEach((p)=>{
     const name=displayName(p.id);
-    const statRows=ATTRS.map(a=>{
+    const activeAttrs=playerPos(p.id)==='GK'?GK_ATTRS:ATTRS;
+    const statRows=activeAttrs.map(a=>{
       const v=statValue(p.id,a);
       return `<div class="lb-stat-row"><span>${ATTR_ABBR[a]}</span><b>${v!=null?v:'—'}</b></div>`;
     }).join('');
@@ -723,60 +787,143 @@ function selectPlayer(id){
   const grid=document.getElementById('attr-grid');
   grid.innerHTML='';
   const r=db[id]||{};
-  ATTRS.forEach((attr)=>{
-    const key=attr.toLowerCase();
-    const val=r[key]||50;
-    const pct=val/99*100;
-    const isAwareness=attr==='Awareness';
-    const isPace=attr==='Pace';
-    const isPhysical=attr==='Physical';
-    const isSpecial=isAwareness||isPace||isPhysical;
-    const barClass=isSpecial?'attr-bar awareness-bar':(val>=90?'attr-bar high':val>=80?'attr-bar good':'attr-bar avg');
-    const div=document.createElement('div');
-    div.className='attr-row'+(isSpecial?' full-width':'');
-    div.innerHTML=`
-      <div class="attr-label${isSpecial?' awareness':''}">${attr}${isSpecial?' <span class="attr-sublabel">(your read)</span>':''}</div>
-      <div class="attr-input-row">
-        <div class="stepper">
-          <button type="button" class="step-btn" onclick="stepAttr('${attr}',-1)">−</button>
-          <div class="attr-val" id="val-${attr}">${val}</div>
-          <button type="button" class="step-btn" onclick="stepAttr('${attr}',1)">+</button>
-        </div>
-        <div class="attr-bar-wrap"><div class="${barClass}" id="bar-${attr}" style="width:${pct}%"></div></div>
-      </div>
-      ${isAwareness?`<div class="quiz-row">
-        <span class="quiz-meta" id="quiz-meta">${(()=>{const avg=quizAvg(id);return avg!==null?`Quiz avg: ${avg} (${quizScores[id].length} logged)`:'No quizzes logged yet';})()}</span>
-        <input type="number" min="1" max="99" class="quiz-input" id="quiz-input" placeholder="score">
-        <button type="button" class="quiz-log-btn" onclick="logQuizScore('${id}')">Log</button>
-      </div>
-      <div class="entry-list" id="quiz-entries"></div>
-      <div class="blend-row">Blended for OVR: <strong id="blend-val">${effectiveAwareness(id)??'—'}</strong></div>`:''}
-      ${isPace?`<div class="quiz-row">
-        <span class="quiz-meta" id="sprint-meta">${(()=>{const list=sprintTimes[id];return list&&list.length?`Best: ${Math.min(...list.map(e=>e.value))}s (${list.length} logged)`:'No times logged yet';})()}</span>
-        <input type="number" step="0.01" min="0" class="quiz-input" id="sprint-input" placeholder="secs">
-        <button type="button" class="quiz-log-btn" onclick="logSprintTime('${id}')">Log</button>
-      </div>
-      <div class="entry-list" id="sprint-entries"></div>
-      <div class="quiz-row">
-        <span class="quiz-meta" id="manu-meta">${(()=>{const list=manuScores[id];return list&&list.length?`Best: ${Math.max(...list.map(e=>e.value))}/20 (${list.length} logged)`:'No attempts logged yet';})()}</span>
-        <input type="number" min="0" max="20" class="quiz-input" id="manu-input" placeholder="/20">
-        <button type="button" class="quiz-log-btn" onclick="logManU('${id}')">Log</button>
-      </div>
-      <div class="entry-list" id="manu-entries"></div>
-      <div class="blend-row">Blended for OVR: <strong id="pace-blend-val">${effectivePace(id)??'—'}</strong></div>`:''}
-      ${isPhysical?`<div class="quiz-row">
-        <span class="quiz-meta" id="tigereye-meta">${(()=>{const list=tigerEyeTimes[id];return list&&list.length?`Best: ${formatMMSS(Math.min(...list.map(e=>e.value)))} (${list.length} logged)`:'No times logged yet';})()}</span>
-        <input type="text" inputmode="numeric" class="quiz-input" id="tigereye-input" placeholder="m:ss">
-        <button type="button" class="quiz-log-btn" onclick="logTigerEye('${id}')">Log</button>
-      </div>
-      <div class="entry-list" id="tigereye-entries"></div>
-      <div class="blend-row">Blended for OVR: <strong id="physical-blend-val">${effectivePhysical(id)??'—'}</strong></div>`:''}`;
-    grid.appendChild(div);
+  const isGK=playerPos(id)==='GK';
+
+  if(isGK){
+    GK_ATTRS.forEach((attr)=>{
+      const key=attr.toLowerCase();
+      const val=r[key]||50;
+      const pct=val/99*100;
+      const barClass=val>=90?'attr-bar high':val>=80?'attr-bar good':'attr-bar avg';
+      const div=document.createElement('div');
+      div.className='attr-row';
+      div.innerHTML=`
+        <div class="attr-label">${attr}</div>
+        <div class="attr-input-row">
+          <div class="stepper">
+            <button type="button" class="step-btn" onclick="stepAttr('${attr}',-1)">−</button>
+            <div class="attr-val" id="val-${attr}">${val}</div>
+            <button type="button" class="step-btn" onclick="stepAttr('${attr}',1)">+</button>
+          </div>
+          <div class="attr-bar-wrap"><div class="${barClass}" id="bar-${attr}" style="width:${pct}%"></div></div>
+        </div>`;
+      grid.appendChild(div);
+    });
+    updateOVR();
+    return;
+  }
+
+  // Outfield: 6 collapsible category sections (computed from sub-attribute
+  // sliders), then Awareness as its own single directly-rated stat.
+  const accordion=document.createElement('div');
+  accordion.className='cat-accordion';
+  ["Pace","Shooting","Passing","Dribbling","Defending","Physical"].forEach(cat=>{
+    accordion.innerHTML+=categoryAccordionHTML(id,cat);
   });
+  grid.appendChild(accordion);
+
+  const awarenessVal=r.awareness||50;
+  const awarenessPct=awarenessVal/99*100;
+  const awarenessDiv=document.createElement('div');
+  awarenessDiv.className='attr-row full-width';
+  awarenessDiv.innerHTML=`
+    <div class="attr-label awareness">Awareness <span class="attr-sublabel">(your read)</span></div>
+    <div class="attr-input-row">
+      <div class="stepper">
+        <button type="button" class="step-btn" onclick="stepAttr('Awareness',-1)">−</button>
+        <div class="attr-val" id="val-Awareness">${awarenessVal}</div>
+        <button type="button" class="step-btn" onclick="stepAttr('Awareness',1)">+</button>
+      </div>
+      <div class="attr-bar-wrap"><div class="attr-bar awareness-bar" id="bar-Awareness" style="width:${awarenessPct}%"></div></div>
+    </div>
+    <div class="quiz-row">
+      <span class="quiz-meta" id="quiz-meta">${(()=>{const avg=quizAvg(id);return avg!==null?`Quiz avg: ${avg} (${quizScores[id].length} logged)`:'No quizzes logged yet';})()}</span>
+      <input type="number" min="1" max="99" class="quiz-input" id="quiz-input" placeholder="score">
+      <button type="button" class="quiz-log-btn" onclick="logQuizScore('${id}')">Log</button>
+    </div>
+    <div class="entry-list" id="quiz-entries"></div>
+    <div class="blend-row">Blended for OVR: <strong id="blend-val">${effectiveAwareness(id)??'—'}</strong></div>`;
+  grid.appendChild(awarenessDiv);
+
   renderEntries('quiz-entries',quizScores[id],v=>v,'deleteQuizEntry',id);
   renderEntries('sprint-entries',sprintTimes[id],v=>`${v}s`,'deleteSprintEntry',id);
   renderEntries('manu-entries',manuScores[id],v=>`${v}/20`,'deleteManuEntry',id);
   renderEntries('tigereye-entries',tigerEyeTimes[id],v=>formatMMSS(v),'deleteTigerEyeEntry',id);
+  updateOVR();
+}
+
+// Builds one collapsible category section: header (name + computed value)
+// plus a slider per sub-attribute. Pace and Physical also get their
+// existing log-entry blocks (sprint/Man U, Tiger Eye) appended once.
+function categoryAccordionHTML(id,cat){
+  const subs=CATEGORY_SUBATTRS[cat];
+  const catVal=categoryValue(id,cat);
+  const subRows=subs.map(subName=>{
+    const key=SUBATTR_KEY[subName];
+    const manual=(db[id]&&db[id][key]!=null)?db[id][key]:50;
+    return `<div class="sub-row">
+      <div class="sub-label">${subName}</div>
+      <input type="range" min="1" max="99" value="${manual}" class="sub-slider" oninput="onSubSlide('${id}','${cat}','${subName}',this.value)">
+      <div class="sub-val" id="subval-${key}">${manual}</div>
+    </div>`;
+  }).join('');
+  let extraLog='';
+  if(cat==='Pace'){
+    extraLog=`<div class="quiz-row">
+      <span class="quiz-meta" id="sprint-meta">${(()=>{const list=sprintTimes[id];return list&&list.length?`Best: ${Math.min(...list.map(e=>e.value))}s (${list.length} logged)`:'No times logged yet';})()}</span>
+      <input type="number" step="0.01" min="0" class="quiz-input" id="sprint-input" placeholder="secs">
+      <button type="button" class="quiz-log-btn" onclick="logSprintTime('${id}')">Log</button>
+    </div>
+    <div class="entry-list" id="sprint-entries"></div>
+    <div class="quiz-row">
+      <span class="quiz-meta" id="manu-meta">${(()=>{const list=manuScores[id];return list&&list.length?`Best: ${Math.max(...list.map(e=>e.value))}/20 (${list.length} logged)`:'No attempts logged yet';})()}</span>
+      <input type="number" min="0" max="20" class="quiz-input" id="manu-input" placeholder="/20">
+      <button type="button" class="quiz-log-btn" onclick="logManU('${id}')">Log</button>
+    </div>
+    <div class="entry-list" id="manu-entries"></div>
+    <div class="blend-row">Sprint Speed blended: <strong id="pace-blend-val">${subAttrValue(id,'Sprint Speed')??'—'}</strong></div>`;
+  }
+  if(cat==='Physical'){
+    extraLog=`<div class="quiz-row">
+      <span class="quiz-meta" id="tigereye-meta">${(()=>{const list=tigerEyeTimes[id];return list&&list.length?`Best: ${formatMMSS(Math.min(...list.map(e=>e.value)))} (${list.length} logged)`:'No times logged yet';})()}</span>
+      <input type="text" inputmode="numeric" class="quiz-input" id="tigereye-input" placeholder="m:ss">
+      <button type="button" class="quiz-log-btn" onclick="logTigerEye('${id}')">Log</button>
+    </div>
+    <div class="entry-list" id="tigereye-entries"></div>
+    <div class="blend-row">Tiger Eye contribution: <strong id="physical-blend-val">${tigerEyeScore(id)??'—'}</strong> <span class="attr-sublabel">(feeds Jumping / Stamina / Strength)</span></div>`;
+  }
+  return `<div class="cat-section">
+    <div class="cat-header" onclick="toggleCategory('${cat}')">
+      <span class="cat-name">${cat}</span>
+      <span class="cat-value" id="catval-${cat}">${catVal??'—'}</span>
+      <span class="cat-chevron" id="chev-${cat}">▾</span>
+    </div>
+    <div class="cat-subs" id="subs-${cat}" style="display:none;">
+      ${subRows}
+      ${extraLog}
+    </div>
+  </div>`;
+}
+
+function toggleCategory(cat){
+  const panel=document.getElementById('subs-'+cat);
+  const chev=document.getElementById('chev-'+cat);
+  const isOpen=panel.style.display==='block';
+  panel.style.display=isOpen?'none':'block';
+  chev.style.transform=isOpen?'rotate(0deg)':'rotate(180deg)';
+}
+
+function onSubSlide(id,cat,subName,value){
+  const key=SUBATTR_KEY[subName];
+  if(!db[id]) db[id]={};
+  db[id][key]=parseInt(value);
+  const valEl=document.getElementById('subval-'+key);
+  if(valEl) valEl.textContent=value;
+  if(subName==='Sprint Speed'){
+    const el=document.getElementById('pace-blend-val');
+    if(el) el.textContent=subAttrValue(id,'Sprint Speed')??'—';
+  }
+  refreshCategoryHeader(id,cat);
   updateOVR();
 }
 
@@ -791,7 +938,7 @@ function onPosEdit(){
   if(!sel)return;
   if(!db[sel])db[sel]={};
   db[sel].position=document.getElementById('pos-select').value;
-  updateOVR();
+  selectPlayer(sel);
 }
 
 function onYearEdit(){
@@ -819,12 +966,8 @@ function stepAttr(attr,dir){
   const bar=document.getElementById(`bar-${attr}`);
   bar.style.width=pct+'%';
   const isA=attr==='Awareness';
-  const isP=attr==='Pace';
-  const isPh=attr==='Physical';
-  bar.className=(isA||isPh)?'attr-bar awareness-bar':(val>=90?'attr-bar high':val>=80?'attr-bar good':'attr-bar avg');
+  bar.className=isA?'attr-bar awareness-bar':(val>=90?'attr-bar high':val>=80?'attr-bar good':'attr-bar avg');
   if(isA) updateBlendDisplay(sel);
-  if(isP) refreshPaceExtra(sel);
-  if(isPh) refreshPhysicalExtra(sel);
   updateOVR();
 }
 
@@ -838,7 +981,9 @@ async function saveRatings(){
   const btn=document.getElementById('save-btn');
   btn.disabled=true;btn.textContent='SAVING...';
   const r=db[sel]||{};
-  await dbUpsert(sel,{display_name:document.getElementById('name-input').value||displayName(sel),position:document.getElementById('pos-select').value,year:document.getElementById('year-select').value,jersey_num:parseInt(document.getElementById('num-input').value)||0,pace:r.pace||50,shooting:r.shooting||50,passing:r.passing||50,dribbling:r.dribbling||50,defending:r.defending||50,physical:r.physical||50,awareness:r.awareness||50});
+  const payload={display_name:document.getElementById('name-input').value||displayName(sel),position:document.getElementById('pos-select').value,year:document.getElementById('year-select').value,jersey_num:parseInt(document.getElementById('num-input').value)||0,awareness:r.awareness||50,diving:r.diving||50,handling:r.handling||50,kicking:r.kicking||50,reflexes:r.reflexes||50,speed:r.speed||50,positioning:r.positioning||50};
+  Object.values(SUBATTR_KEY).forEach(k=>{payload[k]=r[k]||50;});
+  await dbUpsert(sel,payload);
   btn.disabled=false;btn.textContent='SAVE RATINGS';
   buildPlayerSelect();
   const t=document.getElementById('toast');t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);
