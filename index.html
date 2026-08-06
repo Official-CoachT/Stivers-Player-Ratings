@@ -345,14 +345,6 @@ function formatMMSS(totalSeconds){
   return `${m}:${sPadded}`;
 }
 
-async function seedMissingPlayers(){
-  const missing=INITIAL_SEED.filter(p=>!db[p.id]);
-  for(const p of missing){
-    db[p.id]={display_name:p.name,position:p.pos,jersey_num:p.num};
-    await dbUpsert(p.id,{display_name:p.name,position:p.pos,jersey_num:p.num});
-  }
-}
-
 async function dbFetchQuiz(){
   try{
     const r=await fetch(`${SB_URL}/rest/v1/quiz_scores?select=id,player_id,score`,{headers:{apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`}});
@@ -1000,7 +992,6 @@ function switchTab(tab,e){
 
 async function init(){
   await dbFetch();
-  await seedMissingPlayers();
   roster=Object.keys(db);
   await dbFetchQuiz();
   await dbFetchSprints();
